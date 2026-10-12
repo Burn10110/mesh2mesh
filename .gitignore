@@ -1,0 +1,13 @@
+# docs and notes stay local (README.md for external users would be the exception)
+*.md
+docs/
+# check scripts, run artefacts, third-party models
+tools/
+samples/
+# environment and build output
+.venv/
+__pycache__/
+.pytest_cache/
+dist/
+build/
+packaging/_build/
