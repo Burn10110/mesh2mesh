@@ -31,6 +31,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import NO_MATERIAL, Material, Mesh, Node, Scene, Texture
+from ..i18n import N_, tr
 
 CORE = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 MAT = "http://schemas.microsoft.com/3dmanufacturing/material/2015/02"
@@ -42,8 +43,8 @@ UNIT_M = {"micron": 1e-6, "millimeter": 1e-3, "centimeter": 1e-2, "meter": 1.0,
           "inch": 0.0254, "foot": 0.3048}
 TEXTURE_REL = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dtexture"
 # property groups we do not map: tag -> what the user loses
-UNSUPPORTED_GROUPS = {f"{{{MAT}}}compositematerials": "смешанные материалы",
-                      f"{{{MAT}}}multiproperties": "составные свойства"}
+UNSUPPORTED_GROUPS = {f"{{{MAT}}}compositematerials": N_("смешанные материалы"),
+                      f"{{{MAT}}}multiproperties": N_("составные свойства")}
 
 
 def _matrix(s):
@@ -52,7 +53,7 @@ def _matrix(s):
     if s:
         v = [float(x) for x in s.split()]
         if len(v) != 12:
-            raise ValueError(f"3MF: transform должен содержать 12 чисел: {s!r}")
+            raise ValueError(tr("3MF: transform должен содержать 12 чисел: {s!r}", s=s))
         m[:3, :3] = np.array(v[:9]).reshape(3, 3).T
         m[:3, 3] = v[9:12]
     return m
@@ -64,7 +65,7 @@ def _rgba(s):
     if len(h) == 6:
         h += "FF"
     if len(h) != 8:
-        raise ValueError(f"3MF: неверный цвет {s!r}")
+        raise ValueError(tr("3MF: неверный цвет {s!r}", s=s))
     return tuple(int(h[i:i + 2], 16) / 255 for i in range(0, 8, 2))
 
 
@@ -78,7 +79,7 @@ def _color_keys(colors):
     strings."""
     c = np.clip(colors, 0, 1) * 255
     if np.isnan(c).any():
-        raise ValueError("3MF: цвет вершины — не число (NaN)")
+        raise ValueError(tr("3MF: цвет вершины — не число (NaN)"))
     key = np.zeros(len(c), dtype=np.uint64)
     for j in range(c.shape[1]):
         key = (key << np.uint64(8)) | np.round(c[:, j]).astype(np.uint64)
@@ -130,7 +131,7 @@ def _root_part(z):
                 return r.get("Target").lstrip("/")
     if "3D/3dmodel.model" in names:
         return "3D/3dmodel.model"
-    raise ValueError("3MF: не найдена основная модель (3D/3dmodel.model)")
+    raise ValueError(tr("3MF: не найдена основная модель (3D/3dmodel.model)"))
 
 
 # --- fast path: <vertices>/<triangles> bodies on bytes (knowledge/perf.md) -------------------
@@ -451,7 +452,7 @@ def _tris_et(els):
         try:
             p[has[:, k], k] = [int(x) for x in vals if x is not None]
         except (ValueError, OverflowError):
-            raise ValueError(f"3MF: неверный индекс свойства в {a} у треугольника") from None
+            raise ValueError(tr("3MF: неверный индекс свойства в {a} у треугольника", a=a)) from None
     return _Tris(v, pid, names, p, has)
 
 
@@ -472,7 +473,7 @@ class _Reader:
             try:
                 data = self.z.read(path)
             except KeyError:
-                raise ValueError(f"3MF: нет части {path}") from None
+                raise ValueError(tr("3MF: нет части {path}", path=path)) from None
             root, fast = _parse_part(data)
             del data
             self.fast.update(fast)
@@ -491,15 +492,16 @@ class _Reader:
                 elif el.tag == f"{{{MAT}}}texture2d":
                     self.tex2d[(path, el.get("id"))] = el
                     if {el.get("tilestyleu", "wrap"), el.get("tilestylev", "wrap")} != {"wrap"}:
-                        self.scene.warn("3MF: режим края текстуры (mirror/clamp) не переносится "
-                                        "— будет повтор")
+                        self.scene.warn(tr("3MF: режим края текстуры (mirror/clamp) не "
+                                           "переносится — будет повтор"))
                 elif el.tag == f"{{{MAT}}}texture2dgroup":
                     uv = np.array([[float(c.get("u")), float(c.get("v"))]
                                    for c in el.findall("m:tex2coord", NS)]).reshape(-1, 2)
                     groups[el.get("id")] = TexGroup(el.get("texid"), uv)
                 elif el.tag in UNSUPPORTED_GROUPS:
                     groups[el.get("id")] = None
-                    self.scene.warn(f"3MF: {UNSUPPORTED_GROUPS[el.tag]} не поддерживаются — отброшены")
+                    self.scene.warn(tr("3MF: {v} не поддерживаются — отброшены",
+                                       v=tr(UNSUPPORTED_GROUPS[el.tag])))
             self.parts[path] = (root, objs, groups)
         return self.parts[path]
 
@@ -508,7 +510,8 @@ class _Reader:
         if key not in self.mat_of:
             groups = self.part(path)[2]
             if pid not in groups:
-                raise ValueError(f"3MF: ссылка на несуществующую группу свойств pid={pid}")
+                raise ValueError(tr("3MF: ссылка на несуществующую группу свойств pid={pid}",
+                                    pid=pid))
             g = groups[pid]
             if g is None:
                 self.mat_of[key] = -1
@@ -516,7 +519,8 @@ class _Reader:
                 self.mat_of[key] = self.texture_material(path, g.texid)
             else:
                 if not 0 <= index < len(g):
-                    raise ValueError(f"3MF: индекс свойства {index} вне группы pid={pid}")
+                    raise ValueError(tr("3MF: индекс свойства {index} вне группы pid={pid}",
+                                        index=index, pid=pid))
                 kind, name, rgba = g[index]
                 if kind == "color":
                     # an unnamed colour equal to a named base material is that material
@@ -538,7 +542,8 @@ class _Reader:
         if key not in self.tex_mat:
             el = self.tex2d.get(key)
             if el is None:
-                raise ValueError(f"3MF: ссылка на несуществующую текстуру texid={texid}")
+                raise ValueError(tr("3MF: ссылка на несуществующую текстуру texid={texid}",
+                                    texid=texid))
             ref = el.get("path", "")
             name = posixpath.basename(ref) or f"texture_{texid}"
             part = ref.lstrip("/") if ref.startswith("/") else \
@@ -546,11 +551,11 @@ class _Reader:
             try:
                 tex = Texture(name, self.z.read(posixpath.normpath(part)))
             except KeyError:
-                self.scene.warn(f"3MF: нет файла текстуры {ref} — текстура отброшена")
+                self.scene.warn(tr("3MF: нет файла текстуры {ref} — текстура отброшена", ref=ref))
                 tex = None
             if tex is not None and textures.kind(tex.data, name) not in textures.WEB_KINDS:
-                self.scene.warn(f"3MF: текстура {ref} не PNG/JPEG (нарушение формата) — "
-                                "перенесена как есть")
+                self.scene.warn(tr("3MF: текстура {ref} не PNG/JPEG (нарушение формата) — "
+                                   "перенесена как есть", ref=ref))
             self.tex_mat[key] = len(self.scene.materials)
             self.scene.materials.append(
                 Material(posixpath.splitext(name)[0], (1.0, 1.0, 1.0, 1.0), tex))
@@ -558,14 +563,15 @@ class _Reader:
 
     def node(self, path, oid, matrix, depth=0):
         if depth > 64:
-            raise ValueError("3MF: слишком глубокая (циклическая?) вложенность компонентов")
+            raise ValueError(tr("3MF: слишком глубокая (циклическая?) вложенность компонентов"))
         objs = self.part(path)[1]
         if oid not in objs:
-            raise ValueError(f"3MF: объект {oid} не найден в {path}")
+            raise ValueError(tr("3MF: объект {oid} не найден в {path}", oid=oid, path=path))
         o = objs[oid]
         node = Node(o.get("name") or f"object_{oid}", matrix)
         if o.get("type") not in (None, "model"):
-            self.scene.warn(f"3MF: тип объекта «{o.get('type')}» перенесён как обычная деталь")
+            self.scene.warn(tr("3MF: тип объекта «{v}» перенесён как обычная деталь",
+                               v=o.get('type')))
         mesh = o.find("c:mesh", NS)
         if mesh is not None:
             key = (path, oid)
@@ -598,7 +604,7 @@ class _Reader:
             tt = _tris_et(list(tris_el) if tris_el is not None else [])
         tris = tt.v
         if len(tris) and (tris.min() < 0 or tris.max() >= len(pos)):
-            raise ValueError(f"3MF: объект {oid}: индекс вершины вне диапазона")
+            raise ValueError(tr("3MF: объект {oid}: индекс вершины вне диапазона", oid=oid))
         face_mat, corner_col, corner_uv = self.properties(path, o, tt)
         return Mesh.from_triangles(o.get("name") or f"mesh_{oid}", pos, tris,
                                    face_material=face_mat if np.any(face_mat >= 0) else None,
@@ -644,7 +650,8 @@ class _Reader:
             if np.any(bad):
                 r, k = divmod(int(np.argmax(bad.ravel())), 3)
                 err = (4 * int(rows[r]) + 1 + k,
-                       f"3MF: индекс UV {int(pk[rows[r], k])} вне группы pid={names[g]}")
+                       tr("3MF: индекс UV {v} вне группы pid={v2}",
+                          v=int(pk[rows[r], k]), v2=names[g]))
                 uv_err = min(uv_err, err) if uv_err else err
         order = np.argsort(keys, kind="stable") if n_g else np.arange(len(keys))
         keys_s, cpid_s, cidx_s = keys[order], cpid[order], cidx[order]
@@ -697,7 +704,7 @@ def read(path):
         root = r.part(root_path)[0]
         unit = root.get("unit", "millimeter")
         if unit not in UNIT_M:
-            raise ValueError(f"3MF: неизвестная единица {unit!r}")
+            raise ValueError(tr("3MF: неизвестная единица {unit!r}", unit=unit))
         r.scene.unit_m = UNIT_M[unit]
         build = root.find("c:build", NS)
         for it in (build if build is not None else []):
@@ -705,9 +712,9 @@ def read(path):
             ipath = posixpath.normpath(ipath.lstrip("/")) if ipath else root_path
             r.scene.nodes.append(r.node(ipath, it.get("objectid"), _matrix(it.get("transform"))))
         if root.find("c:metadata", NS) is not None or any(n.startswith("Metadata/") for n in z.namelist()):
-            r.scene.warn("3MF: метаданные и миниатюра не переносятся")
+            r.scene.warn(tr("3MF: метаданные и миниатюра не переносятся"))
     if not r.scene.nodes:
-        r.scene.warn("3MF: в <build> нет ни одной детали")
+        r.scene.warn(tr("3MF: в <build> нет ни одной детали"))
     return r.scene
 
 
@@ -775,8 +782,8 @@ class _Writer:
         if id(tex) not in self.tex_id:
             k = textures.kind(tex.data, tex.name)
             if k not in textures.WEB_KINDS:
-                self.loss(f"3MF: текстура «{tex.name}» в формате {(k or 'неизвестном').upper()} "
-                          "не записана — 3MF допускает только PNG и JPEG")
+                self.loss(tr("3MF: текстура «{name}» в формате {v} не записана — 3MF допускает "
+                             "только PNG и JPEG", name=tex.name, v=(k or tr('неизвестном')).upper()))
                 self.tex_id[id(tex)] = None
             else:
                 tid = self.tex_id[id(tex)] = self.new_id()
@@ -794,13 +801,13 @@ class _Writer:
             if tex is None:
                 continue
             if mesh.uv is None:
-                self.loss("3MF: текстура у меша без UV не записана")
+                self.loss(tr("3MF: текстура у меша без UV не записана"))
                 continue
             tid = self.texture2d(tex)
             if tid is not None:
                 out[fm == mi] = tid
-                self.loss("3MF: у граней с текстурой имя и цвет материала не хранятся "
-                          "(в 3MF это просто картинка)")
+                self.loss(tr("3MF: у граней с текстурой имя и цвет материала не хранятся (в 3MF "
+                             "это просто картинка)"))
         return out
 
     def mesh_object(self, mesh, name, positions, tris, tri_face):
@@ -817,8 +824,8 @@ class _Writer:
         tex = self.tex_of_face(mesh, fm)
         plain = np.flatnonzero(tex < 0)
         if mesh.uv is not None and len(plain):
-            self.loss("3MF: UV граней без текстуры отброшены (3MF хранит UV только вместе "
-                      "с текстурой)")
+            self.loss(tr("3MF: UV граней без текстуры отброшены (3MF хранит UV только вместе с "
+                         "текстурой)"))
         for tid in sorted(set(tex.tolist()) - {-1}):
             sel = np.flatnonzero(tex == tid)
             uv = mesh.uv[tris[sel]].reshape(-1, 2)
@@ -832,7 +839,7 @@ class _Writer:
             rows[sel, 4:] = idx.reshape(-1, 3)
         if mesh.colors is not None and not geom.colors_redundant(mesh, self.scene.materials):
             if len(plain) < len(tris):
-                self.loss("3MF: цвета вершин на гранях с текстурой отброшены")
+                self.loss(tr("3MF: цвета вершин на гранях с текстурой отброшены"))
             if len(plain):
                 cg = self.new_id()
                 keys = _color_keys(mesh.colors)
@@ -856,7 +863,7 @@ class _Writer:
         obj_pid, has = "", rows[:, 3] >= 0
         if has.any():
             if not has.all():
-                raise AssertionError("3MF: свойства есть не у всех треугольников")
+                raise AssertionError(tr("3MF: свойства есть не у всех треугольников"))
             obj_pid = f' pid="{rows[0, 3]}" pindex="{rows[0, 4]}"'
             # pid on every triangle, even when it equals the object's: lib3mf 2.5 (and so
             # programs built on it) ignores p1/p2/p3 of a triangle without its own pid
@@ -880,12 +887,12 @@ class _Writer:
         if node.mesh is not None:
             mesh = self.scene.meshes[node.mesh]
             if mesh.n_faces == 0:
-                self.loss("3MF: пустые меши (без граней) отброшены")
+                self.loss(tr("3MF: пустые меши (без граней) отброшены"))
             elif node.mesh in self.mesh_obj:
                 oid, name = self.mesh_obj[node.mesh]
                 if name != (node.name or mesh.name):
-                    self.loss("3MF: экземпляры одного меша носят имя первого "
-                              "(у инстансов в 3MF нет своих имён)")
+                    self.loss(tr("3MF: экземпляры одного меша носят имя первого (у инстансов в "
+                                 "3MF нет своих имён)"))
                 comps.append(oid)
             else:
                 name = node.name or mesh.name
@@ -895,7 +902,7 @@ class _Writer:
                 comps.append(oid)
         if not node.children:
             if node.mesh is None:
-                self.loss("3MF: пустые узлы (без меша и детей) отброшены")
+                self.loss(tr("3MF: пустые узлы (без меша и детей) отброшены"))
             return comps[0] if comps else None
         parts = [f'<component objectid="{c}"/>' for c in comps]
         for ch in node.children:
@@ -960,9 +967,9 @@ def _write_big(z, name, data):
 def losses(scene):
     w = []
     if any(not m.is_triangles for m in scene.meshes):
-        w.append("3MF: многоугольники разбиты на треугольники")
+        w.append(tr("3MF: многоугольники разбиты на треугольники"))
     if any(m.normals is not None for m in scene.meshes):
-        w.append("3MF: нормали отброшены (формат их не хранит)")
+        w.append(tr("3MF: нормали отброшены (формат их не хранит)"))
     return w
 
 
@@ -972,12 +979,12 @@ def write(scene, path, scale=1.0, unit_m=1e-3):
     more than the face material -> a colorgroup per mesh. Returns warning lines."""
     unit = next((n for n, v in UNIT_M.items() if np.isclose(v, unit_m, rtol=1e-9)), None)
     if unit is None:
-        raise ValueError(f"3MF: единица {unit_m} м не выражается в 3MF")
+        raise ValueError(tr("3MF: единица {unit_m} м не выражается в 3MF", unit_m=unit_m))
     wr = _Writer(scene, scale)
     w = losses(scene)
     if any(geom.is_mirror(n.matrix) for n, *_ in scene.walk()):
         # consumers disagree on the winding of mirrored components: bake them into vertices
-        w.append("3MF: есть зеркальные трансформы — иерархия и инстансы запечены в вершины")
+        w.append(tr("3MF: есть зеркальные трансформы — иерархия и инстансы запечены в вершины"))
         for b in geom.bake(scene):
             if b.mesh.n_faces:
                 wr.items.append((wr.mesh_object(b.mesh, b.name, b.positions, b.tris, b.tri_face),
@@ -996,7 +1003,7 @@ def write(scene, path, scale=1.0, unit_m=1e-3):
                          + "".join(f'<base name="{_esc(n)}" displaycolor="#{_hex(c)}"/>'
                                    for n, c in mats) + "</basematerials>\n")
     if not wr.items:
-        w.append("3MF: нечего записать — в сцене нет граней")
+        w.append(tr("3MF: нечего записать — в сцене нет граней"))
     model = "".join([
         '<?xml version="1.0" encoding="UTF-8"?>\n',
         f'<model unit="{unit}" xml:lang="en-US" xmlns="{CORE}" xmlns:m="{MAT}">\n<resources>\n',

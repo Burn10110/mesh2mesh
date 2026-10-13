@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from mesh2mesh import geom
+from mesh2mesh.i18n import N_, tr
 
 GREY = (0.72, 0.74, 0.78)
 SELECT_COLOR = (1.0, 0.85, 0.15)
@@ -16,13 +17,18 @@ EDGE_LIMIT = 3_000_000   # more polygon edges than this: draw faces only (GL mem
 SMOOTH_FILE, SMOOTH_AUTO, SMOOTH_FLAT = "file", "auto", "flat"
 AUTO_ANGLE = 30.0
 ANGLE_EPS = 1e-5   # radians: ties at exactly AUTO_ANGLE (float32 noise ~1e-6) are smooth
-SMOOTHING = {   # mode -> (menu text, tooltip)
-    SMOOTH_FILE: ("Из файла", "Нормали из файла: гладко там, где автор сгладил, острые рёбра"
-                              " остаются. Меши без нормалей (STL, 3MF…) — плоско"),
-    SMOOTH_AUTO: ("Авто 30°", f"Нормали пересчитаны по углу между гранями (до {AUTO_ANGLE:g}° —"
-                              " гладко), нормали файла не используются"),
-    SMOOTH_FLAT: ("Плоско", "Каждая грань плоская — видны все фасеты"),
+SMOOTHING = {   # mode -> (menu text, tooltip); shown through smoothing_texts()
+    SMOOTH_FILE: (N_("Из файла"), N_("Нормали из файла: гладко там, где автор сгладил, острые "
+                                     "рёбра остаются. Меши без нормалей (STL, 3MF…) — плоско")),
+    SMOOTH_AUTO: (N_("Авто {angle:g}°"), N_("Нормали пересчитаны по углу между гранями (до "
+                                           "{angle:g}° — гладко), нормали файла не используются")),
+    SMOOTH_FLAT: (N_("Плоско"), N_("Каждая грань плоская — видны все фасеты")),
 }
+
+
+def smoothing_texts(mode):
+    """(menu text, tooltip) of a SMOOTHING mode in the current language."""
+    return tuple(tr(s, angle=AUTO_ANGLE) for s in SMOOTHING[mode])
 
 
 @dataclass

@@ -1,11 +1,15 @@
-"""Window: python -m mesh2mesh_gui [model]   |   --smoke-test model out.png"""
+"""Window: python -m mesh2mesh_gui [--lang ru|en] [model]   |   --smoke-test model out.png"""
 
 import datetime
 import os
+import re
 import sys
 import traceback
 
 from PySide6.QtWidgets import QApplication  # before pyqtgraph: it picks the loaded Qt binding
+
+from mesh2mesh import i18n
+from mesh2mesh.i18n import tr
 
 LOG_LIMIT = 1_000_000  # bytes; the log is started afresh past this
 
@@ -38,21 +42,11 @@ def _install_excepthook(app, log):
     def hook(tp, value, tb):
         traceback.print_exception(tp, value, tb)
         from PySide6.QtWidgets import QMessageBox
-        where = f"\n\nПодробности записаны в журнал:\n{log}" if log else ""
-        QMessageBox.critical(app.activeWindow(), "Ошибка программы",
-                             f"Что-то пошло не так: {tp.__name__}: {value}{where}")
+        where = tr("\n\nПодробности записаны в журнал:\n{log}", log=log) if log else ""
+        QMessageBox.critical(app.activeWindow(), tr("Ошибка программы"),
+                             tr("Что-то пошло не так: {name}: {value}{where}",
+                                name=tp.__name__, value=value, where=where))
     sys.excepthook = hook
-
-
-def _install_translator(app):
-    """Qt's own buttons (Yes/No, Cancel) in Russian, like the rest of the window."""
-    from PySide6.QtCore import QLibraryInfo, QTranslator
-    tr = QTranslator(app)
-    if tr.load("qtbase_ru", QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
-        app.installTranslator(tr)
-        return True
-    print("qtbase_ru translation not found")
-    return False
 
 
 def _smoke_test(app, w, model, out_png):
@@ -93,12 +87,18 @@ def _smoke_test(app, w, model, out_png):
                                                      QImageReader.supportedImageFormats())),
                  f"tree rows: {w.tree.topLevelItemCount()}", f"losses: {w.loss_key is not None}",
                  f"gl error: {w.view.gl_error}",
+                 f"language: {i18n.get_lang()}",
                  f"qt russian: {app.property('ru_translation')}",
                  f"icon sizes: {len(app.windowIcon().availableSizes())}",
                  f"view pixels drawn (1/49 sample): {drawn}"]
         with open(out_png + ".txt", "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         ok = loaded and w.loss_key is not None and drawn > 20 and app.property("ru_translation")
+        # the language really applied: English window has no Cyrillic in its main texts
+        if i18n.get_lang() == "en":
+            texts = [w.save_btn.text(), w.size_label.text(), w.open_btn.text(),  # no model data:
+                     w.scale_label.text(), w.view_bar.smooth.text()]  # names may be Cyrillic
+            ok = ok and not any(re.search("[%s-%s]" % (chr(0x400), chr(0x4FF)), t) for t in texts)
         app.exit(0 if ok else 3)
 
     w.open_file(model)
@@ -117,19 +117,34 @@ def _taskbar_identity():
             pass
 
 
+def _split_lang(args):
+    """--lang X / --lang=X out of args -> (lang or None, the other args)."""
+    lang = i18n.pre_parse_lang(args)
+    rest, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a == "--lang":
+            skip = True
+        elif not a.startswith("--lang="):
+            rest.append(a)
+    return lang, rest
+
+
 def main():
     log = _setup_log()
     _taskbar_identity()
-    app = QApplication(sys.argv)
+    lang, args = _split_lang(sys.argv[1:])
+    app = QApplication(sys.argv[:1])
     app.setApplicationName("mesh2mesh")
     from .icon import app_icon
     app.setWindowIcon(app_icon())
-    app.setProperty("ru_translation", _install_translator(app))
+    from .window import MainWindow, apply_qt_language, load_qt_russian
+    app.setProperty("ru_translation", load_qt_russian(app))
     _install_excepthook(app, log)
-    from .window import MainWindow
-    w = MainWindow()
+    w = MainWindow(lang)
+    apply_qt_language(app)
     w.show()
-    args = sys.argv[1:]
     if len(args) == 3 and args[0] == "--smoke-test":
         _smoke_test(app, w, os.path.abspath(args[1]), os.path.abspath(args[2]))
     elif args:

@@ -1,5 +1,8 @@
 """Main window: open -> look (tree, size, axes) -> pick a format (losses shown up front) -> save
--> plain-language result with the read-back verdict."""
+-> plain-language result with the read-back verdict.
+
+Language (mesh2mesh.i18n): every text is set in MainWindow._retranslate(), which runs at start
+and again when the user switches the language (remembered in QSettings "lang")."""
 
 import os
 import subprocess
@@ -7,7 +10,7 @@ import traceback
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6.QtCore import QSettings, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QLibraryInfo, QSettings, Qt, QThread, QTimer, QTranslator, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
@@ -15,15 +18,40 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QSplitter, QTextBrowser, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from mesh2mesh import __url__, __version__, convert, formats, geom
+from mesh2mesh import __url__, __version__, convert, formats, geom, i18n
+from mesh2mesh.i18n import N_, tr
 
 from . import display, report, teximage
 from .viewer import MeshView, ViewBar
 
-APP_TITLE = "mesh2mesh — конвертер 3D-моделей"
+APP_TITLE = N_("mesh2mesh — конвертер 3D-моделей")
+LANG_NAMES = {"ru": "Русский", "en": "English"}   # each in its own language: never translated
 LEVEL_COLOR = {report.OK: "#2e9e4f", report.WARN: "#d08a00", report.ERROR: "#d03a2a"}
 LEVEL_MARK = {report.OK: "✔", report.WARN: "⚠", report.ERROR: "✖"}
 GRAY = "color: gray"
+
+_qt_ru = None   # QTranslator with Qt's own Russian (qtbase_ru), see load_qt_russian()
+
+
+def load_qt_russian(app):
+    """Load Qt's Russian for its own buttons (Yes/No, Cancel); True if found. Installed while
+    the window is in Russian (apply_qt_language)."""
+    global _qt_ru
+    t = QTranslator(app)
+    if t.load("qtbase_ru", QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
+        _qt_ru = t
+        return True
+    print("qtbase_ru translation not found")
+    return False
+
+
+def apply_qt_language(app):
+    if _qt_ru is None:
+        return
+    if i18n.get_lang() == "ru":
+        app.installTranslator(_qt_ru)
+    else:
+        app.removeTranslator(_qt_ru)
 
 
 @dataclass
@@ -38,7 +66,7 @@ class Model:
 def load_model(path, in_units):
     ext = os.path.splitext(path)[1].lower()
     if ext not in formats.READERS:
-        raise ValueError(f"формат {ext or '(без расширения)'} не поддерживается")
+        raise ValueError(tr("формат {ext} не поддерживается", ext=ext or tr("(без расширения)")))
     scene = formats.READERS[ext](path)
     has_units = scene.unit_m is not None
     if not has_units:
@@ -80,12 +108,18 @@ def _hint(text):
     return lab
 
 
+def _exts():
+    return ", ".join(e[1:].upper() for e in sorted(formats.READERS))
+
+
 class MainWindow(QMainWindow):
     SETTINGS = ("clean_mesh", "mesh2mesh")   # tools/gui_check.py swaps it: user prefs stay intact
 
-    def __init__(self):
+    def __init__(self, lang=None):
+        """lang: 'ru'/'en' forced (command line); None: the saved choice, else env/system."""
         super().__init__()
         self.settings = QSettings(*self.SETTINGS)
+        i18n.set_lang(lang or self.settings.value("lang", None))
         self.model = None
         self.job = None            # load / save: blocks the controls
         self.loss_job = None       # trial write for the losses box: runs alongside
@@ -93,7 +127,7 @@ class MainWindow(QMainWindow):
         self.scale = 1.0
         self.rotation = np.eye(3)
         self.last_out = None
-        self.setWindowTitle(f"{APP_TITLE} {__version__}")
+        self.gl_note = None
         self.setAcceptDrops(True)
         self.resize(1360, 860)
         self.loss_timer = QTimer(self)
@@ -101,7 +135,7 @@ class MainWindow(QMainWindow):
         self.loss_timer.setInterval(250)
         self.loss_timer.timeout.connect(self._run_losses)
         self._build_ui()
-        self._refresh()
+        self._retranslate()
 
     # ---------- UI ----------
     def _build_ui(self):
@@ -111,20 +145,19 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(side)
 
         # 1. file
-        box = QGroupBox("1. Файл")
+        self.file_box = box = QGroupBox()
         b = QVBoxLayout(box)
-        exts = ", ".join(e[1:].upper() for e in sorted(formats.READERS))
-        self.open_btn = QPushButton(f"Открыть модель…  ({exts})")
+        self.open_btn = QPushButton()
         self.open_btn.clicked.connect(self.open_dialog)
-        self.file_label = QLabel("Файл не выбран. Можно перетащить файл в окно.")
+        self.file_label = QLabel()
         self.file_label.setWordWrap(True)
         self.file_info = _hint("")
         row = QHBoxLayout()
-        self.in_units_label = QLabel("Числа в файле — это:")
+        self.in_units_label = QLabel()
         row.addWidget(self.in_units_label)
         self.in_units = QComboBox()
         for key in convert.UNITS:
-            self.in_units.addItem(report.UNIT_RU[key], key)
+            self.in_units.addItem("", key)
         self.in_units.setCurrentIndex(max(0, self.in_units.findData(
             self.settings.value("in_units", "mm"))))
         self.in_units.currentIndexChanged.connect(self._in_units_changed)
@@ -137,10 +170,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(box)
 
         # 2. contents
-        box = QGroupBox("2. Содержимое")
+        self.tree_box = box = QGroupBox()
         b = QVBoxLayout(box)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Объект", "Треугольников", "Материалы"])
+        self.tree.setColumnCount(3)
         self.tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
         hh = self.tree.header()
@@ -151,8 +184,6 @@ class MainWindow(QMainWindow):
         self.tree.setColumnWidth(2, 120)
         self.tree.itemSelectionChanged.connect(self._tree_selected)
         self.tree.setMinimumHeight(120)
-        self.tree.setToolTip("Щелчок по строке — объект крупно (с вложенными); «Показать всё» — "
-                             "вся модель. ×N — один меш, повторённый N раз (экземпляры).")
         b.addWidget(self.tree, 1)
         self.read_warn = QLabel()
         self.read_warn.setWordWrap(True)
@@ -160,20 +191,19 @@ class MainWindow(QMainWindow):
         lay.addWidget(box, 1)
 
         # 3. size and axes
-        box = QGroupBox("3. Размер и оси")
+        self.size_box = box = QGroupBox()
         b = QVBoxLayout(box)
         self.size_label = QLabel()
         self.size_label.setWordWrap(True)
         b.addWidget(self.size_label)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Масштаб:"))
+        self.scale_label = QLabel()
+        row.addWidget(self.scale_label)
         self.down_btn = QPushButton("÷ 10")
         self.up_btn = QPushButton("× 10")
         self.scale_edit = QLineEdit("1")
         self.scale_edit.setMaximumWidth(110)
         self.scale_edit.setAlignment(Qt.AlignCenter)
-        self.scale_edit.setToolTip("Любое число > 0: 25.4 — дюймы в мм, 0.1 — мм в см… "
-                                   "Габарит не тот в 10/100/1000 раз — поправьте здесь")
         self.scale_edit.editingFinished.connect(self._scale_typed)
         self.down_btn.clicked.connect(lambda: self._set_scale(self.scale / 10))
         self.up_btn.clicked.connect(lambda: self._set_scale(self.scale * 10))
@@ -185,18 +215,15 @@ class MainWindow(QMainWindow):
         self.rot_btns = []
         for axis in "xyz":
             btn = QPushButton(f"↻ {axis.upper()} 90°")
-            btn.setToolTip(f"Повернуть модель на 90° вокруг оси {axis.upper()}. Лежит на боку — "
-                           "крутите, пока синяя ось Z не смотрит вверх модели")
             btn.clicked.connect(lambda _=False, a=axis: self._rotate(a))
             row.addWidget(btn)
             self.rot_btns.append(btn)
-        self.rot_reset = QPushButton("Как в файле")
+        self.rot_reset = QPushButton()
         self.rot_reset.clicked.connect(self._rotate_reset)
         row.addWidget(self.rot_reset)
         b.addLayout(row)
         row = QHBoxLayout()
-        self.view_reset = QPushButton("Показать всё")
-        self.view_reset.setToolTip("Вся модель в кадре, без подсветки")
+        self.view_reset = QPushButton()
         self.view_reset.clicked.connect(self._show_all)
         row.addWidget(self.view_reset)
         self.rot_label = _hint("")
@@ -205,27 +232,28 @@ class MainWindow(QMainWindow):
         lay.addWidget(box)
 
         # 4. save
-        box = QGroupBox("4. Сохранить")
+        self.save_box = box = QGroupBox()
         b = QVBoxLayout(box)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Формат:"))
+        self.fmt_label = QLabel()
+        row.addWidget(self.fmt_label)
         self.fmt = QComboBox()
-        for ext, label in report.FORMATS.items():
-            self.fmt.addItem(label, ext)
+        for ext in report.FORMATS:
+            self.fmt.addItem("", ext)
         self.fmt.setCurrentIndex(max(0, self.fmt.findData(self.settings.value("format", ".3mf"))))
         self.fmt.currentIndexChanged.connect(self._format_changed)
         row.addWidget(self.fmt, 1)
         b.addLayout(row)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Единицы:"))
+        self.out_units_label = QLabel()
+        row.addWidget(self.out_units_label)
         self.out_units = QComboBox()
-        self.out_units.addItem("как у исходника", None)
+        self.out_units.addItem("", None)
         for key in convert.UNITS:
-            self.out_units.addItem(report.UNIT_RU[key], key)
+            self.out_units.addItem("", key)
         self.out_units.currentIndexChanged.connect(self._options_changed)
         row.addWidget(self.out_units)
-        self.ascii = QCheckBox("текстом (ASCII)")
-        self.ascii.setToolTip("STL/PLY текстом: больше файл; STL так сохраняет имена объектов")
+        self.ascii = QCheckBox()
         self.ascii.setChecked(self.settings.value("ascii", "false") == "true")
         self.ascii.toggled.connect(self._options_changed)
         row.addWidget(self.ascii)
@@ -237,7 +265,7 @@ class MainWindow(QMainWindow):
         self.losses.setWordWrap(True)
         self.losses.setTextInteractionFlags(Qt.TextSelectableByMouse)
         b.addWidget(self.losses)
-        self.save_btn = QPushButton("Сохранить")
+        self.save_btn = QPushButton()
         self.save_btn.setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px")
         self.save_btn.clicked.connect(self.save_dialog)
         b.addWidget(self.save_btn)
@@ -248,14 +276,24 @@ class MainWindow(QMainWindow):
         self.result.setVisible(False)
         b.addWidget(self.result)
         lay.addWidget(box)
-        author = QLabel(f'<a href="{__url__}" style="color: gray">автор: '
-                        f'{__url__.split("//")[1].rstrip("/")}</a>')
+
+        # footer: language (left), author (right)
+        row = QHBoxLayout()
+        self.lang = QComboBox()
+        for code, name in LANG_NAMES.items():
+            self.lang.addItem(name, code)
+        self.lang.setCurrentIndex(max(0, self.lang.findData(i18n.get_lang())))
+        self.lang.currentIndexChanged.connect(self._lang_changed)
+        row.addWidget(self.lang)
+        row.addStretch()
+        author = QLabel()
         author.setOpenExternalLinks(True)
         author.setToolTip(__url__)
-        author.setAlignment(Qt.AlignRight)
+        author.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         author.setStyleSheet("font-size: 8pt")
         self.author = author
-        lay.addWidget(author)
+        row.addWidget(author)
+        lay.addLayout(row)
 
         scroll = QScrollArea()  # small screens / long result: scroll, never squash the tree
         scroll.setWidget(side)
@@ -298,6 +336,65 @@ class MainWindow(QMainWindow):
             act.triggered.connect(slot)
             self.addAction(act)
 
+    def _retranslate(self):
+        """Every text of the window in the current language: at start and on a switch.
+        Texts made while reading or saving (reader warnings, the result's details) stay in
+        the language they were made in until the file is opened / saved again."""
+        self.file_box.setTitle(tr("1. Файл"))
+        self.open_btn.setText(tr("Открыть модель  ({exts})", exts=_exts()))
+        self.in_units_label.setText(tr("Числа в файле — это:"))
+        for combo in (self.in_units, self.out_units):
+            for i in range(combo.count()):
+                key = combo.itemData(i)
+                combo.setItemText(i, report.unit(key) if key else tr("как у исходника"))
+        self.tree_box.setTitle(tr("2. Содержимое"))
+        self.tree.setHeaderLabels([tr("Объект"), tr("Треугольников"), tr("Материалы")])
+        self.tree.setToolTip(tr("Щелчок по строке — объект крупно (с вложенными); «Показать всё» "
+                                "— вся модель. ×N — один меш, повторённый N раз (экземпляры)."))
+        self.size_box.setTitle(tr("3. Размер и оси"))
+        self.scale_label.setText(tr("Масштаб:"))
+        self.scale_edit.setToolTip(tr("Любое число > 0: 25.4 — дюймы в мм, 0.1 — мм в см… "
+                                      "Габарит не тот в 10/100/1000 раз — поправьте здесь"))
+        for axis, btn in zip("XYZ", self.rot_btns):
+            btn.setToolTip(tr("Повернуть модель на 90° вокруг оси {axis}. Лежит на боку — "
+                              "крутите, пока синяя ось Z не смотрит вверх модели", axis=axis))
+        self.rot_reset.setText(tr("Как в файле"))
+        self.view_reset.setText(tr("Показать всё"))
+        self.view_reset.setToolTip(tr("Вся модель в кадре, без подсветки"))
+        self.save_box.setTitle(tr("4. Сохранить"))
+        self.fmt_label.setText(tr("Формат:"))
+        for i in range(self.fmt.count()):
+            self.fmt.setItemText(i, tr(report.FORMATS[self.fmt.itemData(i)]))
+        self.out_units_label.setText(tr("Единицы:"))
+        self.ascii.setText(tr("текстом (ASCII)"))
+        self.ascii.setToolTip(tr("STL/PLY текстом: больше файл; STL так сохраняет имена объектов"))
+        self.lang.setToolTip(tr("Язык интерфейса"))
+        site = __url__.split("//")[1].rstrip("/")
+        self.author.setText(f'<a href="{__url__}" style="color: gray">'
+                            f'{_esc(tr("автор: {site}", site=site))}</a>')
+        self.view.retranslate()
+        self.view_bar.retranslate()
+        if self.gl_note is not None:
+            self.gl_note.setText(self._gl_note_html())
+        if self.model is None:
+            self.setWindowTitle(f"{tr(APP_TITLE)} {__version__}")
+            self.file_label.setText(tr("Файл не выбран. Можно перетащить файл в окно."))
+        else:
+            self._show_model_texts()
+            self._fill_tree()
+        if self.last_out is not None:
+            self._show_result()
+        self.loss_key = None
+        self._schedule_losses()
+        self._refresh()
+
+    def _lang_changed(self):
+        lang = self.lang.currentData()
+        self.settings.setValue("lang", lang)
+        i18n.set_lang(lang)
+        apply_qt_language(QApplication.instance())
+        self._retranslate()
+
     # ---------- state ----------
     @property
     def has(self):
@@ -336,14 +433,16 @@ class MainWindow(QMainWindow):
         self.ascii.setEnabled(idle and self.out_ext in formats.TEXT_OPTION)
         self.fmt.setEnabled(idle)
         self.save_btn.setEnabled(idle and has)
-        self.save_btn.setText(f"Сохранить как {self.out_ext[1:].upper()}")
+        fmt = self.out_ext[1:].upper()
+        self.save_btn.setText(tr("Сохранить как {fmt}", fmt=fmt))
         if not has:
-            self.size_label.setText("" if self.model is None else "В файле нет геометрии — "
-                                    "сохранять нечего.")
+            self.size_label.setText("" if self.model is None else
+                                    tr("В файле нет геометрии — сохранять нечего."))
             self.rot_label.setText("")
             self.units_note.setText("")
             return
         units = self._effective_units()
+        unit = report.unit(units)
         m = self.model
         size = report.size_in(m.disp, m.scene.unit_m, units, self.scale, self.rotation)
         changed = self.scale != 1.0
@@ -354,26 +453,26 @@ class MainWindow(QMainWindow):
         diag = float(np.linalg.norm(size)) or 1.0
         self.view.set_grid(step / diag)
         turned = not np.allclose(self.rotation, np.eye(3))
-        self.rot_label.setText(("Повёрнута относительно файла" if turned else "Оси как в файле")
-                               + f" · клетка сетки {report.fmt_len(step)} "
-                               f"{report.UNIT_RU[units]}")
+        self.rot_label.setText(tr("{axes} · клетка сетки {step} {unit}",
+                                  axes=tr("Повёрнута относительно файла") if turned else
+                                  tr("Оси как в файле"), step=report.fmt_len(step), unit=unit))
+        notes = []
         if fixed:
-            note = f"{self.out_ext[1:].upper()} по спецификации всегда в метрах."
+            notes.append(tr("{fmt} по спецификации всегда в метрах.", fmt=fmt))
         elif self._units_choice() is None:
-            note = f"Будет записано в {report.UNIT_RU[units]}."
-        else:
-            note = ""
+            notes.append(tr("Будет записано в {unit}.", unit=unit))
         if self.out_ext in (".obj", ".stl", ".ply"):
-            note += (" Единица в этот формат не записывается — получатель должен знать, что "
-                     f"числа в {report.UNIT_RU[units]}.")
-        self.units_note.setText(note.strip())
+            notes.append(tr("Единица в этот формат не записывается — получатель должен знать, что "
+                            "числа в {unit}.", unit=unit))
+        self.units_note.setText(" ".join(notes))
 
     # ---------- open ----------
     def open_dialog(self):
         if self.job:
             return
         start = self.settings.value("last_dir", "")
-        path, _ = QFileDialog.getOpenFileName(self, "Открыть модель", start, report.INPUT_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, tr("Открыть модель"), start,
+                                              report.input_filter())
         if path:
             self.open_file(path)
 
@@ -381,8 +480,8 @@ class MainWindow(QMainWindow):
         if self.job:
             return
         if os.path.splitext(path)[1].lower() not in formats.READERS:
-            exts = ", ".join(e[1:].upper() for e in sorted(formats.READERS))
-            QMessageBox.warning(self, APP_TITLE, f"Этот формат не поддерживается.\nЕсть: {exts}.")
+            QMessageBox.warning(self, tr(APP_TITLE),
+                                tr("Этот формат не поддерживается.\nЕсть: {exts}.", exts=_exts()))
             return
         self.settings.setValue("last_dir", os.path.dirname(path))
         self._pending = path
@@ -390,7 +489,7 @@ class MainWindow(QMainWindow):
         self.job.done.connect(self._loaded)
         self.job.failed.connect(self._load_failed)
         self.job.finished.connect(self._job_finished)
-        self._busy(f"Читаю {os.path.basename(path)}…")
+        self._busy(tr("Читаю {name}…", name=os.path.basename(path)))
         self.job.start()
 
     def _loaded(self, model):
@@ -400,28 +499,42 @@ class MainWindow(QMainWindow):
         self.rotation = np.eye(3)
         self.result.setVisible(False)
         self.last_out = None
-        name = os.path.basename(model.path)
-        self.setWindowTitle(f"{name} — {APP_TITLE} {__version__}")
-        self.file_label.setText(f"<b>{_esc(name)}</b>")
-        self.file_info.setText("<br>".join(_esc(s) for s in report.file_summary(
-            model.scene, model.path, model.has_units, model.disp, model.images)))
-        warns = model.scene.warnings
-        self.read_warn.setText(
-            "" if not warns else
-            _html_lines([(report.WARN, "При чтении: " + w) for w in warns]))
         self.view.set_display(model.disp, self.rotation, images=model.images)
         self.view_bar.wire.setEnabled(self.view.has_edges)
-        self.view_bar.wire.setToolTip("Рёбра многоугольников поверх любого режима" if
-                                      self.view.has_edges else
-                                      f"Рёбер больше {display.EDGE_LIMIT:,} — каркас не рисуется"
-                                      .replace(",", " "))
-        self.view_bar.set_smoothing_note(report.normals_note(model.disp))
+        self._show_model_texts()
         self._fill_tree()
         self.loss_key = None
         self._schedule_losses()
 
+    def _show_model_texts(self):
+        """Title, file summary, reader warnings, smoothing note of the loaded model."""
+        m = self.model
+        name = os.path.basename(m.path)
+        self.setWindowTitle(f"{name} — {tr(APP_TITLE)} {__version__}")
+        self.file_label.setText(f"<b>{_esc(name)}</b>")
+        self._show_file_info()
+        warns = m.scene.warnings
+        self.read_warn.setText(
+            "" if not warns else
+            _html_lines([(report.WARN, tr("При чтении: {w}", w=w)) for w in warns]))
+        self._wire_tooltip()
+        self.view_bar.set_smoothing_note(report.normals_note(m.disp))
+
+    def _show_file_info(self):
+        m = self.model
+        self.file_info.setText("<br>".join(_esc(s) for s in report.file_summary(
+            m.scene, m.path, m.has_units, m.disp, m.images)))
+
+    def _wire_tooltip(self):
+        if self.view.has_edges:
+            tip = tr("Рёбра многоугольников поверх любого режима")
+        else:
+            tip = tr("Рёбер больше {n} — каркас не рисуется", n=report.fmt_int(display.EDGE_LIMIT))
+        self.view_bar.wire.setToolTip(tip)
+
     def _load_failed(self, msg):
-        QMessageBox.critical(self, APP_TITLE, f"Не удалось прочитать файл\n{self._pending}\n\n{msg}")
+        QMessageBox.critical(self, tr(APP_TITLE), tr("Не удалось прочитать файл\n{path}\n\n{msg}",
+                                                     path=self._pending, msg=msg))
 
     def _job_finished(self):
         self.job = None
@@ -445,7 +558,7 @@ class MainWindow(QMainWindow):
 
         def add(node, parent):
             item = QTreeWidgetItem(parent)
-            name = node.name or "(без имени)"
+            name = node.name or tr("(без имени)")
             parts = []
             if node.mesh is not None:
                 mesh = scene.meshes[node.mesh]
@@ -456,8 +569,8 @@ class MainWindow(QMainWindow):
                     item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
                 if uses[node.mesh] > 1:
                     name += f"  ×{uses[node.mesh]}"
-                    item.setToolTip(0, f"Меш «{mesh.name}» повторён {uses[node.mesh]} раз "
-                                       "(экземпляры)")
+                    item.setToolTip(0, tr("Меш «{mesh}» повторён {n} раз (экземпляры)",
+                                          mesh=mesh.name, n=uses[node.mesh]))
                     item.setForeground(0, QColor("#4a7fc0"))
                 item.setText(2, mats(mesh))
                 item.setToolTip(2, item.text(2))
@@ -505,8 +618,7 @@ class MainWindow(QMainWindow):
         m = self.model
         if m is not None and not m.has_units:
             m.scene.unit_m = convert.UNITS[self.in_units.currentData()]
-            self.file_info.setText("<br>".join(_esc(s) for s in report.file_summary(
-                m.scene, m.path, m.has_units, m.disp, m.images)))
+            self._show_file_info()
             self._schedule_losses()
         self._refresh()
 
@@ -518,8 +630,8 @@ class MainWindow(QMainWindow):
     def _scale_typed(self):
         v = report.parse_scale(self.scale_edit.text())
         if v is None:
-            self.statusBar().showMessage("Масштаб — положительное число, например 10 или 0.001",
-                                         6000)
+            self.statusBar().showMessage(tr("Масштаб — положительное число, например 10 или "
+                                            "0.001"), 6000)
             v = self.scale
         self._set_scale(v)
 
@@ -546,15 +658,16 @@ class MainWindow(QMainWindow):
     def _current_loss_key(self):
         m = self.model
         return (id(m), m.scene.unit_m, self.out_ext, self._units_choice(),
-                tuple(sorted(self._write_opts().items())))
+                tuple(sorted(self._write_opts().items())), i18n.get_lang())
 
     def _schedule_losses(self):
         if not self.has:
             self.losses.setText("")
             return
         if self.loss_key != self._current_loss_key():
-            self.losses.setText(f'<span style="{GRAY}">Проверяю, что вместит '
-                                f'{self.out_ext[1:].upper()}…</span>')
+            self.losses.setText(f'<span style="{GRAY}">'
+                                + _esc(tr("Проверяю, что вместит {fmt}…",
+                                          fmt=self.out_ext[1:].upper())) + "</span>")
         self.loss_timer.start()
 
     def _run_losses(self):
@@ -579,7 +692,8 @@ class MainWindow(QMainWindow):
     def _losses_failed(self, msg):
         if self.has and self._loss_running == self._current_loss_key():
             self.loss_key = self._loss_running
-            self.losses.setText(_html_lines([(report.ERROR, f"Пробная запись не удалась: {msg}")]))
+            self.losses.setText(_html_lines([(report.ERROR,
+                                              tr("Пробная запись не удалась: {msg}", msg=msg))]))
 
     def _losses_finished(self):
         self.loss_job = None
@@ -594,15 +708,16 @@ class MainWindow(QMainWindow):
         ext = self.out_ext
         start = report.default_out_path(m.path, ext, self.settings.value("out_dir", None))
         filt = f"{ext[1:].upper()} (*{ext})"
-        path, _ = QFileDialog.getSaveFileName(self, f"Сохранить как {ext[1:].upper()}", start, filt)
+        path, _ = QFileDialog.getSaveFileName(self, tr("Сохранить как {fmt}", fmt=ext[1:].upper()),
+                                              start, filt)
         if not path:
             return
         path, typed = report.fix_out_path(path, ext)
         if typed != ext:  # the user typed another known extension: that is the format now
             self.fmt.setCurrentIndex(self.fmt.findData(typed))
         if os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(m.path)):
-            QMessageBox.warning(self, APP_TITLE, "Нельзя записать поверх исходного файла — "
-                                                 "выберите другое имя.")
+            QMessageBox.warning(self, tr(APP_TITLE), tr("Нельзя записать поверх исходного файла — "
+                                                        "выберите другое имя."))
             return
         self.settings.setValue("out_dir", os.path.dirname(path))
         self.job = Job(convert.convert, m.path, path, self._units_choice(), "mm", self.scale,
@@ -610,21 +725,24 @@ class MainWindow(QMainWindow):
         self.job.done.connect(self._saved)
         self.job.failed.connect(self._save_failed)
         self.job.finished.connect(self._job_finished)
-        self._busy("Сохраняю и проверяю чтением…")
+        self._busy(tr("Сохраняю и проверяю чтением…"))
         self.job.start()
 
     def _saved(self, res):
         self.last_out = res
-        html = _html_lines(report.result_summary(res, self.model.scene.warnings))
-        html += ("<p style='margin:6px 0'><a href='show'>Показать в папке</a> · "
-                 "<a href='details'>Технический отчёт</a></p>")
-        self.result.setHtml(html)
+        self._show_result()
         self.result.setVisible(True)
-        self.statusBar().showMessage("Сохранено" if res.ok else
-                                     "Сохранено, но проверка чтением не прошла", 10000)
+        self.statusBar().showMessage(tr("Сохранено") if res.ok else
+                                     tr("Сохранено, но проверка чтением не прошла"), 10000)
+
+    def _show_result(self):
+        html = _html_lines(report.result_summary(self.last_out, self.model.scene.warnings))
+        html += (f"<p style='margin:6px 0'><a href='show'>{_esc(tr('Показать в папке'))}</a> · "
+                 f"<a href='details'>{_esc(tr('Технический отчёт'))}</a></p>")
+        self.result.setHtml(html)
 
     def _save_failed(self, msg):
-        QMessageBox.critical(self, APP_TITLE, f"Не удалось сохранить.\n\n{msg}")
+        QMessageBox.critical(self, tr(APP_TITLE), tr("Не удалось сохранить.\n\n{msg}", msg=msg))
 
     def _result_link(self, url):
         res = self.last_out
@@ -637,22 +755,26 @@ class MainWindow(QMainWindow):
             else:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
         else:
-            box = QMessageBox(QMessageBox.Information, "Технический отчёт",
-                              "Отчёт как в командной строке (можно скопировать).", parent=self)
+            box = QMessageBox(QMessageBox.Information, tr("Технический отчёт"),
+                              tr("Отчёт как в командной строке (можно скопировать)."), parent=self)
             box.setDetailedText("\n".join(res.lines + ["WARNING: " + w for w in res.warnings]
                                           + ["MISMATCH: " + w for w in res.mismatches]))
             box.exec()
 
+    def _gl_note_html(self):
+        return ("<p style='font-size:12pt'><b>" + _esc(tr("3D-просмотр недоступен")) + "</b></p>"
+                "<p>" + _esc(tr("Видеокарта или драйвер не дают OpenGL 2.0 (так бывает в "
+                                "удалённом рабочем столе и виртуальных машинах).")) + "</p>"
+                "<p>" + _esc(tr("Открыть модель, посмотреть содержимое и сохранить в другой "
+                                "формат можно как обычно — не будет только картинки. Поможет "
+                                "обновление драйвера видеокарты.")) + "</p>"
+                f"<p style='color:gray; font-size:8pt'>{_esc(self.gl_detail)}</p>")
+
     def _gl_failed(self, detail):
         """No usable OpenGL: drop the 3D view, keep everything else (loading, size, saving
         need no graphics card)."""
-        note = QLabel("<p style='font-size:12pt'><b>3D-просмотр недоступен</b></p>"
-                      "<p>Видеокарта или драйвер не дают OpenGL 2.0 (так бывает в удалённом "
-                      "рабочем столе и виртуальных машинах).</p>"
-                      "<p>Открыть модель, посмотреть содержимое и сохранить в другой формат "
-                      "можно как обычно — не будет только картинки. Поможет обновление драйвера "
-                      "видеокарты.</p>"
-                      f"<p style='color:gray; font-size:8pt'>{_esc(detail)}</p>")
+        self.gl_detail = detail
+        note = QLabel(self._gl_note_html())
         note.setWordWrap(True)
         note.setAlignment(Qt.AlignCenter)
         note.setMargin(40)
@@ -676,7 +798,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         if self.job and self.job.isRunning():
-            if QMessageBox.question(self, APP_TITLE, "Идёт работа. Всё равно закрыть?") \
+            if QMessageBox.question(self, tr(APP_TITLE), tr("Идёт работа. Всё равно закрыть?")) \
                     != QMessageBox.Yes:
                 e.ignore()
                 return

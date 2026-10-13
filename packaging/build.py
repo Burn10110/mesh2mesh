@@ -3,7 +3,7 @@ dist/mesh2mesh-<ver>.zip.
 
     .venv/Scripts/python packaging/build.py [--no-test] [--no-zip] [--test-only]
 
-Steps: version resources -> PyInstaller (packaging/mesh2mesh.spec) -> README.txt -> self-test of
+Steps: version resources -> PyInstaller (packaging/mesh2mesh.spec) -> README_EN/RU.txt -> self-test of
 the built programs (not the sources) -> zip. Exit 1 if anything fails.
 """
 
@@ -72,12 +72,12 @@ def run_pyinstaller():
 
 
 def write_readme():
-    src = os.path.join(HERE, "README.txt")
-    with open(src, encoding="utf-8") as f:
-        text = f.read().replace("{version}", __version__).replace("{url}", __url__)
-    # UTF-8 with BOM: Notepad on any Windows opens it as Unicode
-    with open(os.path.join(APP, "README.txt"), "w", encoding="utf-8-sig", newline="\r\n") as f:
-        f.write(text)
+    for name in ("README_EN.txt", "README_RU.txt"):
+        with open(os.path.join(HERE, name), encoding="utf-8") as f:
+            text = f.read().replace("{version}", __version__).replace("{url}", __url__)
+        # UTF-8 with BOM: Notepad on any Windows opens it as Unicode
+        with open(os.path.join(APP, name), "w", encoding="utf-8-sig", newline="\r\n") as f:
+            f.write(text)
 
 
 def make_texture_obj(folder):
@@ -164,16 +164,23 @@ def self_test():
     run_cli(os.path.join(base, "нет такого.fbx"), "-o", os.path.join(out, "x.obj"), expect=2)
 
     # window: model loads, losses computed, view draws, textures decoded by the Qt plugins
-    for model, maps, tag in ((mixamo, 5, "mixamo"), (canister, 0, "canister"),
-                             (texobj, n_maps, "texformats")):
+    # (in English the smoke test also checks the main texts have no Cyrillic)
+    for model, maps, tag, lang in ((mixamo, 5, "mixamo", "ru"), (canister, 0, "canister", "en"),
+                                   (canister, 0, "canister_ru", "ru"),
+                                   (texobj, n_maps, "texformats", "en")):
         png = os.path.join(TEST_OUT, f"exe_smoke_{tag}.png")
         t = time.time()
-        r = subprocess.run([gui, "--smoke-test", model, png], env=env, timeout=300)
+        r = subprocess.run([gui, "--lang", lang, "--smoke-test", model, png], env=env, timeout=300)
         txt = open(png + ".txt", encoding="utf-8").read() if os.path.exists(png + ".txt") else ""
         print(txt)
-        check(r.returncode == 0, f"mesh2mesh.exe --smoke-test {tag}: exit {r.returncode} "
-                                 f"({time.time() - t:.1f} s), screenshot {png}")
+        check(r.returncode == 0, f"mesh2mesh.exe --lang {lang} --smoke-test {tag}: exit "
+                                 f"{r.returncode} ({time.time() - t:.1f} s), screenshot {png}")
+        check(f"language: {lang}" in txt, f"{tag}: window in {lang}")
         check(f"textures shown: {maps}/{maps}" in txt, f"{tag}: all {maps} texture maps shown")
+    r = subprocess.run([cli, "--lang", "en", "--help"], env=env, capture_output=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+    check(r.returncode == 0 and not any("Ѐ" <= c <= "ӿ" for c in r.stdout),
+          "mesh2mesh-cli.exe --lang en --help: English")
 
     # no usable OpenGL (RDP/VM): the offscreen platform gives no GL context; the window must
     # survive with a notice (exit 3 = view not drawn) and still load the model.

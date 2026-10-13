@@ -21,6 +21,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import Material, Mesh, Node, Scene, Texture
+from ..i18n import tr
 
 C3 = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)   # scene -> glTF
 C4 = np.eye(4)
@@ -41,7 +42,8 @@ def _load(path):
     if data[:4] == GLB_MAGIC:
         version, length = struct.unpack_from("<II", data, 4)
         if version != 2:
-            raise ValueError(f"GLB: версия контейнера {version}, поддерживается 2")
+            raise ValueError(tr("GLB: версия контейнера {version}, поддерживается 2",
+                                version=version))
         doc, off = None, 12
         while off + 8 <= min(length, len(data)):
             clen, ctype = struct.unpack_from("<II", data, off)
@@ -52,20 +54,20 @@ def _load(path):
                 binchunk = chunk
             off += 8 + clen
         if doc is None:
-            raise ValueError("GLB: нет JSON-блока")
+            raise ValueError(tr("GLB: нет JSON-блока"))
     else:
         try:
             doc = json.loads(data.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            raise ValueError(f"glTF: не JSON ({e})") from None
+            raise ValueError(tr("glTF: не JSON ({e})", e=e)) from None
     if not str(doc.get("asset", {}).get("version", "")).startswith("2"):
-        raise ValueError("glTF: поддерживается только версия 2.0")
+        raise ValueError(tr("glTF: поддерживается только версия 2.0"))
     buffers = []
     for b in doc.get("buffers", []):
         uri = b.get("uri")
         if uri is None:
             if binchunk is None:
-                raise ValueError("glTF: буфер без uri, но нет BIN-блока GLB")
+                raise ValueError(tr("glTF: буфер без uri, но нет BIN-блока GLB"))
             buffers.append(binchunk)
         elif uri.startswith("data:"):
             buffers.append(base64.b64decode(uri.split(",", 1)[1]))
@@ -75,7 +77,7 @@ def _load(path):
                 with open(p, "rb") as fh:
                     buffers.append(fh.read())
             except OSError:
-                raise ValueError(f"glTF: нет файла буфера {uri}") from None
+                raise ValueError(tr("glTF: нет файла буфера {uri}", uri=uri)) from None
     return doc, buffers
 
 
@@ -126,7 +128,7 @@ class _Reader:
         start = bv.get("byteOffset", 0) + off
         stride = bv.get("byteStride") or dt.itemsize * k
         if n and start + stride * (n - 1) + dt.itemsize * k > len(buf):
-            raise ValueError("glTF: accessor выходит за границы буфера")
+            raise ValueError(tr("glTF: accessor выходит за границы буфера"))
         return np.ndarray((n, k), dt, buffer=buf, offset=start, strides=(stride, dt.itemsize))
 
     def accessor(self, i):
@@ -168,7 +170,7 @@ class _Reader:
                 t = textures.load_file(uri, self.folder)
                 name, data = (t.name, t.data) if t else (name, None)
                 if t is None:
-                    self.warn(f"glTF: нет файла текстуры {uri} — текстура отброшена")
+                    self.warn(tr("glTF: нет файла текстуры {uri} — текстура отброшена", uri=uri))
             k = textures.kind(data, name) if data else None
             if data and "." not in name and k:
                 name += textures.KINDS[k][0]
@@ -188,24 +190,24 @@ class _Reader:
                 src = self.doc.get("textures", [])[info["index"]]
                 ii = src.get("source")
                 if ii is None:
-                    self.warn("glTF: текстуры в форматах расширений (WebP, KTX2) не переносятся")
+                    self.warn(tr("glTF: текстуры в форматах расширений (WebP, KTX2) не переносятся"))
                 else:
                     tex = self.image(ii)
                 if info.get("texCoord", 0) != 0:
-                    self.warn("glTF: текстура на втором UV-канале — показана по первому")
+                    self.warn(tr("glTF: текстура на втором UV-канале — показана по первому"))
                 if "KHR_texture_transform" in info.get("extensions", {}):
-                    self.warn("glTF: сдвиг/масштаб UV текстуры (KHR_texture_transform) "
-                              "не переносится")
+                    self.warn(tr("glTF: сдвиг/масштаб UV текстуры (KHR_texture_transform) не "
+                                 "переносится"))
                 if tex is not None and not np.allclose(f[:3], 1, atol=1e-3):
-                    self.warn(f"glTF: «{name}»: оттенок baseColorFactor поверх текстуры "
-                              "не переносится")
+                    self.warn(tr("glTF: «{name}»: оттенок baseColorFactor поверх текстуры не "
+                                 "переносится", name=name))
             others = [k for k in list(gm) + list(pbr) if k.endswith("Texture")
                       and k != "baseColorTexture"]
             if others:
-                self.warn("glTF: переносится только текстура цвета (карты нормалей, "
-                          "металла/шероховатости, свечения, затенения — нет)")
+                self.warn(tr("glTF: переносится только текстура цвета (карты нормалей, "
+                             "металла/шероховатости, свечения, затенения — нет)"))
             if gm.get("extensions") or "emissiveFactor" in gm:
-                self.warn("glTF: из материалов переносится только базовый цвет и прозрачность")
+                self.warn(tr("glTF: из материалов переносится только базовый цвет и прозрачность"))
             self.mat_of[gi] = len(self.scene.materials)
             self.scene.materials.append(Material(name, rgba, tex))
         return self.mat_of[gi]
@@ -220,21 +222,21 @@ class _Reader:
             mode = prim.get("mode", 4)
             attrs = prim.get("attributes", {})
             if mode not in (4, 5, 6):
-                self.warn("glTF: точки и линии отброшены")
+                self.warn(tr("glTF: точки и линии отброшены"))
                 continue
             if "POSITION" not in attrs:
                 continue
             if prim.get("targets"):
-                self.warn("glTF: морф-таргеты (blend shapes) не переносятся")
+                self.warn(tr("glTF: морф-таргеты (blend shapes) не переносятся"))
             if any(k.startswith(("JOINTS_", "WEIGHTS_")) for k in attrs):
-                self.warn("glTF: веса скиннинга не переносятся")
+                self.warn(tr("glTF: веса скиннинга не переносятся"))
             if any(k.startswith("TEXCOORD_") and k != "TEXCOORD_0" for k in attrs):
-                self.warn("glTF: переносится только первый UV-канал")
+                self.warn(tr("glTF: переносится только первый UV-канал"))
             pos = self.accessor(attrs["POSITION"])[:, :3]
             idx = (self.accessor(prim["indices"]).ravel().astype(np.int64) if "indices" in prim
                    else np.arange(len(pos)))
             if len(idx) and (idx.min() < 0 or idx.max() >= len(pos)):
-                raise ValueError(f"glTF: меш «{name}»: индекс вершины вне диапазона")
+                raise ValueError(tr("glTF: меш «{name}»: индекс вершины вне диапазона", name=name))
             tris = _strip_fan(idx, mode)
             get = lambda k: self.accessor(attrs[k]) if k in attrs else None
             col = get("COLOR_0")
@@ -256,17 +258,19 @@ class _Reader:
                 return None
             if not all(have):
                 if fill is None:
-                    self.warn(f"glTF: «{name}»: {what} есть не у всех примитивов — отброшены")
+                    self.warn(tr("glTF: «{name}»: {what} есть не у всех примитивов — отброшены",
+                                 name=name, what=what))
                     return None
-                self.warn(f"glTF: «{name}»: {what} есть не у всех примитивов — у остальных {fill}")
+                self.warn(tr("glTF: «{name}»: {what} есть не у всех примитивов — у остальных "
+                             "{fill}", name=name, what=what, fill=fill))
             return np.concatenate([p[i][:, :width] if p[i] is not None
                                    else np.tile(fill, (len(p[0]), 1)) for p in parts])[corners]
 
         uv = per_corner(2, 2, None, "UV")
         if uv is not None:
             uv = np.c_[uv[:, 0], 1.0 - uv[:, 1]]
-        nrm = per_corner(3, 3, None, "нормали")
-        col = per_corner(4, 4, (1.0, 1.0, 1.0, 1.0), "цвета вершин")
+        nrm = per_corner(3, 3, None, tr("нормали"))
+        col = per_corner(4, 4, (1.0, 1.0, 1.0, 1.0), tr("цвета вершин"))
         fm = np.concatenate([np.full(len(p[1]), p[5], dtype=np.int64) for p in parts])
         self.mesh_of[mi] = len(self.scene.meshes)
         self.scene.meshes.append(Mesh(name, positions, np.full(len(fm), 3, dtype=np.int64),
@@ -277,13 +281,15 @@ class _Reader:
 
     def node(self, i, stack=()):
         if i in stack:
-            raise ValueError("glTF: циклическая иерархия узлов")
+            raise ValueError(tr("glTF: циклическая иерархия узлов"))
         nd = self.doc["nodes"][i]
-        for key, what in (("skin", "скиннинг"), ("camera", "камеры"), ("weights", "веса морфов")):
+        for key, what in (("skin", tr("скиннинг")), ("camera", tr("камеры")),
+                          ("weights", tr("веса морфов"))):
             if key in nd:
-                self.warn(f"glTF: {what} не переносятся")
+                self.warn(tr("glTF: {what} не переносятся", what=what))
         if nd.get("extensions"):
-            self.warn(f"glTF: расширения узлов ({', '.join(nd['extensions'])}) не переносятся")
+            self.warn(tr("glTF: расширения узлов ({v}) не переносятся",
+                         v=', '.join(nd['extensions'])))
         node = Node(nd.get("name") or f"node_{i}", C4.T @ _node_matrix(nd) @ C4)
         if "mesh" in nd:
             node.mesh = self.mesh(nd["mesh"])
@@ -296,27 +302,28 @@ def read(path):
     doc, warn = r.doc, r.warn
     bad = [COMPRESSION[e] for e in doc.get("extensionsRequired", []) if e in COMPRESSION]
     if bad:
-        raise ValueError(f"glTF: сжатие {', '.join(bad)} не поддерживается — "
-                         "пересохраните файл без сжатия")
+        raise ValueError(tr("glTF: сжатие {v} не поддерживается — пересохраните файл без сжатия",
+                            v=', '.join(bad)))
     other = [e for e in doc.get("extensionsUsed", []) if e not in COMPRESSION
              and e != "KHR_mesh_quantization"]
     if other:
-        warn(f"glTF: расширения не переносятся: {', '.join(other)}")
-    for key, what in (("animations", "анимация"), ("skins", "скиннинг"), ("cameras", "камеры")):
+        warn(tr("glTF: расширения не переносятся: {v}", v=', '.join(other)))
+    for key, what in (("animations", tr("анимация")), ("skins", tr("скиннинг")),
+                      ("cameras", tr("камеры"))):
         if doc.get(key):
-            warn(f"glTF: {what} не переносятся")
+            warn(tr("glTF: {what} не переносятся", what=what))
     scenes = doc.get("scenes", [])
     if scenes:
         si = doc.get("scene", 0)
         roots = scenes[si].get("nodes", [])
         if len(scenes) > 1:
-            warn(f"glTF: сцен {len(scenes)} — взята только сцена {si}")
+            warn(tr("glTF: сцен {n_scenes} — взята только сцена {si}", n_scenes=len(scenes), si=si))
     else:
         kids = {c for n in doc.get("nodes", []) for c in n.get("children", [])}
         roots = [i for i in range(len(doc.get("nodes", []))) if i not in kids]
     r.scene.nodes = [r.node(i) for i in roots]
     if not r.scene.nodes and doc.get("meshes"):
-        warn("glTF: в сцене нет узлов — меши без узлов не переносятся")
+        warn(tr("glTF: в сцене нет узлов — меши без узлов не переносятся"))
     return r.scene
 
 
@@ -377,8 +384,8 @@ class _Writer:
             k = textures.kind(tex.data, tex.name)
             ti = None
             if k not in textures.WEB_KINDS:
-                self.loss(f"glTF: текстура «{tex.name}» в формате {(k or 'неизвестном').upper()} "
-                          "не записана — glTF допускает только PNG и JPEG")
+                self.loss(tr("glTF: текстура «{name}» в формате {v} не записана — glTF допускает "
+                             "только PNG и JPEG", name=tex.name, v=(k or tr('неизвестном')).upper()))
             else:
                 img = {"name": os.path.splitext(self.names[id(tex)])[0],
                        "mimeType": textures.KINDS[k][1]}
@@ -411,7 +418,7 @@ class _Writer:
                 if has_uv:
                     ti = self.texture(m.texture)
                 else:
-                    self.loss("glTF: текстура у меша без UV не записана")
+                    self.loss(tr("glTF: текстура у меша без UV не записана"))
             if ti is not None:
                 pbr["baseColorTexture"] = {"index": ti}
             if m.color is not None or ti is not None:
@@ -432,20 +439,20 @@ class _Writer:
         m = self.scene.meshes[mi]
         tris, src = geom.triangulate(m)
         if not len(tris):
-            self.loss("glTF: пустые меши (без граней) отброшены")
+            self.loss(tr("glTF: пустые меши (без граней) отброшены"))
             self.mesh_of[mi] = None
             return None
         fm = m.face_material[src] if m.face_material is not None else np.full(len(tris), -1)
         vcol = m.colors is not None and not geom.colors_redundant(m, self.scene.materials)
         if vcol and np.any(fm >= 0):
-            self.loss("glTF: у мешей с цветами вершин цвет материала записан белым "
-                      "(glTF перемножает их)")
+            self.loss(tr("glTF: у мешей с цветами вершин цвет материала записан белым (glTF "
+                         "перемножает их)"))
         nrm = None
         if m.normals is not None:
             nrm = m.normals @ C3.T
             ln = np.linalg.norm(nrm, axis=1, keepdims=True)
             if np.any(ln < 1e-12):
-                self.loss("glTF: нормали нулевой длины — нормали таких мешей отброшены")
+                self.loss(tr("glTF: нормали нулевой длины — нормали таких мешей отброшены"))
                 nrm = None
             else:
                 nrm = nrm / ln
@@ -490,8 +497,8 @@ class _Writer:
         mtx[:3, 3] *= self.scale
         if not np.array_equal(mtx, np.eye(4)):
             if not _is_trs(mtx):
-                self.loss("glTF: трансформ со сдвигом (shear) записан матрицей — "
-                          "спецификация такого не допускает, программы могут исказить")
+                self.loss(tr("glTF: трансформ со сдвигом (shear) записан матрицей — спецификация "
+                             "такого не допускает, программы могут исказить"))
             j["matrix"] = mtx.T.ravel().tolist()        # column-major
         if n.mesh is not None:
             gm = self.mesh(n.mesh)
@@ -508,7 +515,7 @@ def write(scene, path, scale=1.0, unit_m=1.0):
     .gltf -> JSON + <stem>.bin. Returns warning lines."""
     w = []
     if any(not m.is_triangles for m in scene.meshes):
-        w.append("glTF: многоугольники разбиты на треугольники")
+        w.append(tr("glTF: многоугольники разбиты на треугольники"))
     glb = path.lower().endswith(".glb")
     wr = _Writer(scene, scale, glb)
     roots = [wr.node(n) for n in scene.nodes]

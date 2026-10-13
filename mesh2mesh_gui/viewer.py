@@ -16,6 +16,8 @@ from PySide6.QtGui import QActionGroup, QColor, QOpenGLContext, QVector3D
 from PySide6.QtOpenGL import QOpenGLBuffer
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QMenu, QToolButton, QWidget
 
+from mesh2mesh.i18n import tr
+
 from . import display, shading, teximage
 
 
@@ -198,18 +200,29 @@ class MeshView(gl.GLViewWidget):
         self.grid = gl.GLGridItem(color=(255, 255, 255, 40))
         self.triad = gl.GLLinePlotItem(mode="lines", width=3.0, antialias=True)
         self.labels = [gl.GLTextItem(text=t, color=c) for t, c in
-                       (("X", (240, 90, 90)), ("Y", (110, 210, 110)), ("Z вверх", (110, 150, 255)))]
+                       (("X", (240, 90, 90)), ("Y", (110, 210, 110)), ("Z", (110, 150, 255)))]
         for item in self._items():
             item.setVisible(False)
             self.addItem(item)
         # orbit and wheel are pyqtgraph's; panning is ours (mouseMoveEvent)
-        self.hint = QLabel("ЛКМ — вращать · колесо — зум · СКМ / Ctrl+ЛКМ — сдвиг "
-                           "(+Shift — по полу)", self)
+        self.hint = QLabel(self)
         self.hint.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.hint.setStyleSheet("color: rgba(255,255,255,110); background: transparent;"
                                 " font-size: 8pt;")
-        self.hint.adjustSize()
+        self.retranslate()
         self.reset_camera()
+
+    def retranslate(self):
+        """Texts in the current language (mesh2mesh.i18n)."""
+        self.labels[2].setData(text=tr("Z вверх"))
+        self.hint.setText(tr("ЛКМ — вращать · колесо — зум · СКМ / Ctrl+ЛКМ — сдвиг "
+                             "(+Shift — по полу)"))
+        self.hint.adjustSize()
+        self._place_hint()
+
+    def _place_hint(self):
+        h = self.hint
+        h.move((self.width() - h.width()) // 2, self.height() - h.height() - 6)
 
     def _program(self, mode):
         if mode not in self._programs:
@@ -253,8 +266,7 @@ class MeshView(gl.GLViewWidget):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
-        h = self.hint
-        h.move((self.width() - h.width()) // 2, self.height() - h.height() - 6)
+        self._place_hint()
 
     def mouseMoveEvent(self, ev):
         """pyqtgraph pans along the floor only (middle button). Ours: middle / Ctrl+left — in the
@@ -459,10 +471,8 @@ class ViewBar(QWidget):
         lay.setSpacing(2)
         self.group = QButtonGroup(self)
         self.buttons = {}
-        for mode, (text, tip) in shading.MODES.items():
+        for mode in shading.MODES:
             b = QToolButton()
-            b.setText(text)
-            b.setToolTip(tip)
             b.setCheckable(True)
             self.group.addButton(b)
             self.buttons[mode] = b
@@ -472,8 +482,6 @@ class ViewBar(QWidget):
         sep.setStyleSheet("color: #555; background: transparent; padding: 0 6px")
         lay.addWidget(sep)
         self.wire = QToolButton()
-        self.wire.setText("Каркас")
-        self.wire.setToolTip("Рёбра многоугольников поверх любого режима")
         self.wire.setCheckable(True)
         self.wire.toggled.connect(self.wireframe_changed)
         lay.addWidget(self.wire)
@@ -483,9 +491,8 @@ class ViewBar(QWidget):
         menu = QMenu(self.smooth)
         group = QActionGroup(menu)
         self.smooth_actions = {}
-        for mode, (text, tip) in display.SMOOTHING.items():
-            a = menu.addAction(text)
-            a.setToolTip(tip)
+        for mode in display.SMOOTHING:
+            a = menu.addAction("")
             a.setCheckable(True)
             group.addAction(a)
             self.smooth_actions[mode] = a
@@ -494,8 +501,24 @@ class ViewBar(QWidget):
         self.smooth.setMenu(menu)
         lay.addWidget(self.smooth)
         self.smooth_note = ""
-        self._show_smoothing(display.SMOOTH_FILE)
+        self.smoothing = display.SMOOTH_FILE
+        self.retranslate()
         lay.addStretch()
+
+    def retranslate(self):
+        """Texts in the current language (mesh2mesh.i18n). The wireframe tooltip depends on
+        the model: the window sets it."""
+        for mode, b in self.buttons.items():
+            text, tip = shading.MODES[mode]
+            b.setText(tr(text))
+            b.setToolTip(tr(tip))
+        self.wire.setText(tr("Каркас"))
+        self.wire.setToolTip(tr("Рёбра многоугольников поверх любого режима"))
+        for mode, a in self.smooth_actions.items():
+            text, tip = display.smoothing_texts(mode)
+            a.setText(text)
+            a.setToolTip(tip)
+        self._show_smoothing(self.smoothing)
 
     def set_state(self, mode, wireframe, smoothing=display.SMOOTH_FILE):
         self.buttons.get(mode, self.buttons[shading.MATERIAL]).setChecked(True)
@@ -509,8 +532,8 @@ class ViewBar(QWidget):
     def _show_smoothing(self, mode):
         self.smoothing = mode
         self.smooth_actions[mode].setChecked(True)
-        text, tip = display.SMOOTHING[mode]
-        self.smooth.setText(f"Сглаживание: {text}")
+        text, tip = display.smoothing_texts(mode)
+        self.smooth.setText(tr("Сглаживание: {mode}", mode=text))
         self.smooth.setToolTip(tip + (f"\n{self.smooth_note}" if self.smooth_note else ""))
 
     def set_smoothing_note(self, note):

@@ -9,6 +9,7 @@ from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QImage
 
 from mesh2mesh import textures
+from mesh2mesh.i18n import tr
 
 MAX_SIZE = 4096   # larger maps are scaled down: GPU limits and memory; the view needs no more
 
@@ -36,8 +37,8 @@ def decode(tex, max_size=MAX_SIZE):
         img = QImage.fromData(QByteArray(tex.data))
         if img.isNull():
             return Image(tex.name, None,
-                         f"формат {kind.upper()} окно не показывает" if kind
-                         else "картинка не читается")
+                         tr("формат {fmt} окно не показывает", fmt=kind.upper()) if kind
+                         else tr("картинка не читается"))
         if max(img.width(), img.height()) > max_size:
             img = img.scaled(max_size, max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         img = img.convertToFormat(QImage.Format_RGBA8888)
@@ -58,14 +59,14 @@ def decode_all(texs):
 
 def read_tga(data):
     """TGA bytes -> (h, w, 4) uint8 RGBA, bottom row first. Types 1/2/3 and their RLE variants
-    9/10/11; 8/15/16/24/32 bits; either origin. ValueError(reason in Russian) otherwise."""
+    9/10/11; 8/15/16/24/32 bits; either origin. ValueError(reason, current language) otherwise."""
     if len(data) < 18:
-        raise ValueError("TGA повреждён")
+        raise ValueError(tr("TGA повреждён"))
     (id_len, cmap_type, kind, cmap_first, cmap_len, cmap_bits, _, _, w, h, bits,
      desc) = struct.unpack("<BBBHHBHHHHBB", data[:18])
     base = kind & ~8
     if base not in (1, 2, 3) or w == 0 or h == 0:
-        raise ValueError(f"вид TGA {kind} окно не показывает")
+        raise ValueError(tr("вид TGA {kind} окно не показывает", kind=kind))
     pos = 18 + id_len
     palette = None
     if cmap_type == 1:
@@ -73,7 +74,7 @@ def read_tga(data):
         palette = _tga_pixels(np.frombuffer(data, np.uint8, size, pos), cmap_bits, False)
         pos += size
     if base == 1 and palette is None:
-        raise ValueError("TGA с палитрой без палитры")
+        raise ValueError(tr("TGA с палитрой без палитры"))
     bpp = (bits + 7) // 8
     n = w * h
     if kind & 8:
@@ -81,7 +82,7 @@ def read_tga(data):
     else:
         raw = np.frombuffer(data, np.uint8, min(n * bpp, max(len(data) - pos, 0)), pos)
         if len(raw) < n * bpp:
-            raise ValueError("TGA повреждён (обрезан)")
+            raise ValueError(tr("TGA повреждён (обрезан)"))
     if base == 1:
         idx = raw.view("<u2") if bpp == 2 else raw
         idx = np.clip(idx.astype(np.int64) - cmap_first, 0, len(palette) - 1)
@@ -102,7 +103,7 @@ def _tga_rle(data, pos, n, bpp):
     end = len(data)
     while len(out) < need:
         if pos >= end:
-            raise ValueError("TGA повреждён (обрезан)")
+            raise ValueError(tr("TGA повреждён (обрезан)"))
         head = data[pos]
         count = (head & 0x7F) + 1
         pos += 1
@@ -134,4 +135,4 @@ def _tga_pixels(raw, bits, gray):
     elif bits == 32:
         p = raw.reshape(-1, 4)
         return p[:, [2, 1, 0, 3]]
-    raise ValueError(f"TGA {bits} бит окно не показывает")
+    raise ValueError(tr("TGA {bits} бит окно не показывает", bits=bits))

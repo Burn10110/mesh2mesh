@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import formats, geom
+from .i18n import tr
 
 UNITS = {"um": 1e-6, "mm": 1e-3, "cm": 1e-2, "m": 1.0, "in": 0.0254, "ft": 0.3048}
 
@@ -16,7 +17,7 @@ def unit_name(unit_m):
     for k, v in UNITS.items():
         if np.isclose(v, unit_m, rtol=1e-9):
             return k
-    return f"{unit_m:g} м"
+    return tr("{v:g} м", v=unit_m)
 
 
 @dataclass
@@ -35,25 +36,27 @@ def _ext(path, what):
     ext = os.path.splitext(path)[1].lower()
     table = formats.READERS if what == "read" else formats.WRITERS
     if ext not in table:
-        verb = "чтения" if what == "read" else "записи"
-        raise ValueError(f"формат {ext or '(без расширения)'} не поддерживается для {verb}; "
-                         f"есть: {', '.join(sorted(table))}")
+        msg = (tr("формат {ext} не поддерживается для чтения; есть: {known}") if what == "read"
+               else tr("формат {ext} не поддерживается для записи; есть: {known}"))
+        raise ValueError(msg.format(ext=ext or tr("(без расширения)"), known=", ".join(sorted(table))))
     return ext
 
 
-def load(path, in_units="mm"):
-    """Read any supported file. Formats without units get `in_units` (with a note)."""
+def load(path, in_units="mm", note_units=True):
+    """Read any supported file. Formats without units get `in_units` (with a note unless
+    note_units is False)."""
     scene = formats.READERS[_ext(path, "read")](path)
     if scene.unit_m is None:
         scene.unit_m = UNITS[in_units]
-        scene.warn(f"в файле нет единиц — принято: {in_units}")
+        if note_units:
+            scene.warn(tr("в файле нет единиц — принято: {u}", u=in_units))
     return scene
 
 
 def transform(scene, scale=1.0, rotation=None):
     """Scale about the origin and rotate (proper rotation) every root node, in place."""
     if scale <= 0:
-        raise ValueError("масштаб должен быть положительным")
+        raise ValueError(tr("масштаб должен быть положительным"))
     m = np.eye(4)
     m[:3, :3] = (np.eye(3) if rotation is None else np.asarray(rotation, float)) * scale
     for node in scene.nodes:
@@ -67,9 +70,9 @@ def describe(scene, unit=None):
     n_inst = sum(1 for _ in scene.instances())
     depth = max((d for *_, d in scene.walk()), default=0)
     st = geom.stats(scene)
-    lines = [f"единицы: {unit_name(scene.unit_m)}; мешей {len(scene.meshes)}, "
-             f"экземпляров {n_inst}, глубина иерархии {depth + 1 if scene.nodes else 0}, "
-             f"материалов {len(scene.materials)}"]
+    lines = [tr("единицы: {unit}; мешей {meshes}, экземпляров {inst}, глубина иерархии {depth}, "
+                "материалов {mats}", unit=unit_name(scene.unit_m), meshes=len(scene.meshes),
+                inst=n_inst, depth=depth + 1 if scene.nodes else 0, mats=len(scene.materials))]
     lines += st.lines(UNITS.get(unit, scene.unit_m), unit)
     return lines
 
@@ -81,8 +84,8 @@ def out_units(scene, out_ext, units=None):
     fixed = formats.FIXED_UNITS.get(out_ext)
     if fixed:
         if units and units != fixed:
-            warns.append(f"{out_ext[1:]}: единицы по спецификации всегда {fixed} — "
-                         f"--units {units} не применён")
+            warns.append(tr("{fmt}: единицы по спецификации всегда {fixed} — --units {units} "
+                            "не применён", fmt=out_ext[1:], fixed=fixed, units=units))
         units = fixed
     units = units or unit_name(scene.unit_m)
     return (units if units in UNITS else "mm"), warns
@@ -98,7 +101,7 @@ def losses(scene, out_ext, units=None, scale=1.0, rotation=None, **write_opts):
     folder, no read-back. Reader warnings are not included."""
     out_ext = out_ext.lower()
     if out_ext not in formats.WRITERS:
-        raise ValueError(f"формат {out_ext} не поддерживается для записи")
+        raise ValueError(tr("формат {ext} не поддерживается для записи", ext=out_ext))
     scene = transform(copy.deepcopy(scene), scale, rotation)
     scene.warnings = []
     units, warns = out_units(scene, out_ext, units)
@@ -122,12 +125,11 @@ def convert(src, dst, units=None, in_units="mm", scale=1.0, rotation=None, scene
     res.warnings += scene.warnings
     res.warnings += _write(scene, dst, out_ext, units, write_opts)
 
-    back = load(dst, units)
-    res.warnings += [f"(read-back) {w}" for w in back.warnings
-                     if not w.startswith("в файле нет единиц")]
+    back = load(dst, units, note_units=False)
+    res.warnings += [f"(read-back) {w}" for w in back.warnings]
     res.mismatches = geom.compare(geom.stats(scene), geom.stats(back),
                                   float32=out_ext in formats.FLOAT32)
     res.lines.append(f"-> {dst}")
     res.lines += ["   " + s for s in describe(back, units)]
-    res.lines.append("проверка чтением: " + ("OK" if res.ok else "РАСХОЖДЕНИЕ"))
+    res.lines.append(tr("проверка чтением: OK") if res.ok else tr("проверка чтением: РАСХОЖДЕНИЕ"))
     return res

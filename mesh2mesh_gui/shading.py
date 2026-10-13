@@ -14,14 +14,16 @@ its alpha clips at 0.5 (no sorting of transparent surfaces in an opaque view).""
 from OpenGL import GL
 from pyqtgraph.opengl import shaders
 
+from mesh2mesh.i18n import N_
+
 CLAY, METAL, MATERIAL, XRAY = "clay", "metal", "material", "xray"
 
-# mode -> (button text, tooltip)
+# mode -> (button text, tooltip); show them through tr()
 MODES = {
-    CLAY: ("Глина", "Матовая глина (matcap): форма без цветов — видны вмятины и рёбра"),
-    METAL: ("Металл", "Красный металл (matcap): блики подчёркивают кривизну и гладкость"),
-    MATERIAL: ("Материал", "Цвета материалов и цвета вершин (vertex paint) из файла"),
-    XRAY: ("Рентген", "Полупрозрачно: видны внутренние и перекрытые детали"),
+    CLAY: (N_("Глина"), N_("Матовая глина (matcap): форма без цветов — видны вмятины и рёбра")),
+    METAL: (N_("Металл"), N_("Красный металл (matcap): блики подчёркивают кривизну и гладкость")),
+    MATERIAL: (N_("Материал"), N_("Цвета материалов и цвета вершин (vertex paint) из файла")),
+    XRAY: (N_("Рентген"), N_("Полупрозрачно: видны внутренние и перекрытые детали")),
 }
 
 _VERTEX = """

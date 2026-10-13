@@ -19,13 +19,16 @@ Get `mesh2mesh-<version>.zip` from [Releases](https://github.com/Burn10110/mesh2
 unzip it anywhere and run `mesh2mesh.exe`. Neither Python nor Blender is needed.
 
 The program is not code-signed. If Windows shows "Windows protected your PC", click **More info →
-Run anyway**. Full instructions (in Russian) are in `README.txt` inside the archive.
+Run anyway**. Full instructions are in `README_EN.txt` (and `README_RU.txt`) inside the archive.
+
+The interface is in English and Russian: it follows the Windows language at first, and the list at
+the bottom left of the window switches it at once (remembered). Command line: `--lang en|ru`.
 
 Requirements: Windows 10/11 x64. The 3D view needs OpenGL 2.0+, but conversion works without it.
 
 ### Using the window
 
-1. Open a model with **Open model…** or by dragging a file onto the window or onto `mesh2mesh.exe`.
+1. Open a model with **Open model** or by dragging a file onto the window or onto `mesh2mesh.exe`.
 2. Check the size. OBJ and STL carry no units, so pick what the numbers mean (mm, cm, m…). Use **÷ 10 /
    × 10** or an exact factor if the model is off by a power of ten.
 3. Fix the orientation with the **X / Y / Z 90°** buttons if the model lies on its side.
@@ -104,13 +107,16 @@ Author: https://burn10110.carrd.co/
 распакуйте в любую папку и запустите `mesh2mesh.exe`. Ни Python, ни Blender не нужны.
 
 Программа не подписана цифровой подписью. Если Windows пишет «Система Windows защитила ваш компьютер»,
-нажмите **Подробнее → Выполнить в любом случае**. Подробная инструкция лежит в `README.txt` внутри архива.
+нажмите **Подробнее → Выполнить в любом случае**. Подробная инструкция лежит в `README_RU.txt` (и `README_EN.txt`) внутри архива.
+
+Интерфейс на русском и английском: сначала — по языку Windows, переключается списком слева внизу окна
+сразу и запоминается. В командной строке — `--lang ru|en`.
 
 Требования: Windows 10/11 x64. Для 3D-вида нужен OpenGL 2.0+, конвертировать можно и без него.
 
 ### Работа в окне
 
-1. Откройте модель кнопкой **Открыть модель…** или перетащите файл в окно или на `mesh2mesh.exe`.
+1. Откройте модель кнопкой **Открыть модель** или перетащите файл в окно или на `mesh2mesh.exe`.
 2. Проверьте размер. В OBJ и STL единиц нет, поэтому выберите, в чём записаны числа (мм, см, м…). Если
    модель в 10, 100 или 1000 раз не того размера, помогут **÷ 10 / × 10** или точный масштаб числом.
 3. Если модель лежит на боку, поверните её кнопками **X / Y / Z 90°**.

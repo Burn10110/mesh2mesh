@@ -12,6 +12,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import Mesh, Node, Scene
+from ..i18n import tr
 
 BIN_DTYPE = np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("attr", "<u2")])
 FACET = ("  facet normal %.7e %.7e %.7e\n    outer loop\n"
@@ -97,13 +98,14 @@ def read(path):
     scene = Scene(unit_m=None)
     if _is_binary(data):
         if len(data) < 84:
-            raise ValueError("STL: файл слишком короткий")
+            raise ValueError(tr("STL: файл слишком короткий"))
         n = struct.unpack_from("<I", data, 80)[0]
         if 84 + n * 50 > len(data):
-            raise ValueError(f"STL: заявлено {n} треугольников, а данных меньше")
+            raise ValueError(tr("STL: заявлено {n} треугольников, а данных меньше", n=n))
         rec = np.frombuffer(data, BIN_DTYPE, n, 84)
         if np.any(rec["attr"]):
-            scene.warn("STL: цвета в attribute-байтах (VisCAM/Materialise) не поддерживаются — отброшены")
+            scene.warn(tr("STL: цвета в attribute-байтах (VisCAM/Materialise) не поддерживаются "
+                          "— отброшены"))
         name = data[:80].split(b"\0")[0].decode("ascii", "replace").strip()
         if name.lower().startswith("solid"):
             name = ""
@@ -113,7 +115,7 @@ def read(path):
         if solids is None:
             solids = _ascii_solids(data)
         if not solids:
-            raise ValueError("STL: не найдено ни одного solid … endsolid")
+            raise ValueError(tr("STL: не найдено ни одного solid … endsolid"))
     for name, tri_pts in solids:
         pos, tris = _weld(tri_pts)
         scene.nodes.append(Node(name, mesh=len(scene.meshes)))
@@ -125,25 +127,25 @@ def losses(scene, binary):
     """What an STL cannot hold, as warning lines."""
     w = []
     if any(not m.is_triangles for m in scene.meshes):
-        w.append("STL: многоугольники разбиты на треугольники")
+        w.append(tr("STL: многоугольники разбиты на треугольники"))
     if scene.materials or any(m.face_material is not None for m in scene.meshes):
-        w.append("STL: материалы и цвета отброшены")
+        w.append(tr("STL: материалы и цвета отброшены"))
     if textures.used_textures(scene):
-        w.append("STL: текстуры отброшены (формат их не хранит)")
+        w.append(tr("STL: текстуры отброшены (формат их не хранит)"))
     if any(m.colors is not None for m in scene.meshes):
-        w.append("STL: цвета вершин отброшены")
+        w.append(tr("STL: цвета вершин отброшены"))
     if any(m.uv is not None for m in scene.meshes):
-        w.append("STL: UV отброшены")
+        w.append(tr("STL: UV отброшены"))
     if any(m.normals is not None for m in scene.meshes):
-        w.append("STL: нормали заменены нормалями граней")
+        w.append(tr("STL: нормали заменены нормалями граней"))
     if not scene.is_flat():
-        w.append("STL: иерархия и инстансы запечены в вершины")
+        w.append(tr("STL: иерархия и инстансы запечены в вершины"))
     if any(not scene.meshes[n.mesh].n_faces for n, _ in scene.instances()):
-        w.append("STL: пустые меши (без граней) отброшены")
+        w.append(tr("STL: пустые меши (без граней) отброшены"))
     n = sum(1 for _ in scene.instances())
     if binary and n > 1:
-        w.append(f"STL (binary): объекты ({n}) слиты в одно тело, имена потеряны "
-                 "(--stl-ascii сохранит их раздельно)")
+        w.append(tr("STL (binary): объекты ({n}) слиты в одно тело, имена потеряны (--stl-ascii "
+                    "сохранит их раздельно)", n=n))
     return w
 
 
@@ -178,6 +180,6 @@ def write(scene, path, scale=1.0, unit_m=None, binary=True):
     w = losses(scene, binary)
     collapsed = sum(geom.float32_collapsed(p[1]) for p in parts)
     if collapsed:
-        w.append(f"STL: {collapsed} треуг. во float32 имеют совпадающие вершины — "
-                 "Blender/слайсеры их выбросят (записаны как есть)")
+        w.append(tr("STL: {collapsed} треуг. во float32 имеют совпадающие вершины — "
+                    "Blender/слайсеры их выбросят (записаны как есть)", collapsed=collapsed))
     return w

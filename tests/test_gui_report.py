@@ -178,10 +178,11 @@ def test_grid_step():
 # --- report texts -----------------------------------------------------------------------------
 
 def test_plural_and_formats():
-    assert report.plural(1, "меш", "меша", "мешей") == "1 меш"
-    assert report.plural(3, "меш", "меша", "мешей") == "3 меша"
-    assert report.plural(11, "меш", "меша", "мешей") == "11 мешей"
-    assert report.plural(23512, "т", "та", "тов") == "23 512 тов"
+    assert report.plural(1, "меш|меша|мешей") == "1 меш"
+    assert report.plural(3, "меш|меша|мешей") == "3 меша"
+    assert report.plural(11, "меш|меша|мешей") == "11 мешей"
+    assert report.plural(23512, "т|та|тов") == "23 512 тов"
+    assert report.plural(21, "т|тов") == "21 тов" and report.plural(1, "т|тов") == "1 т"
     assert report.fmt_len(87.4999) == "87.5"
     assert report.fmt_len(1234.5) == "1 234"
     assert report.fmt_scale(0.001) == "0.001" and report.fmt_scale(10 * 10) == "100"
@@ -246,7 +247,7 @@ def test_out_path_helpers():
 
 def test_formats_offered_are_all_writers():
     assert set(report.FORMATS) == set(formats.WRITERS)
-    assert set(report.UNIT_RU) == set(convert.UNITS)
+    assert set(report.UNIT_NAMES) == set(convert.UNITS)
 
 
 # --- view: panning ----------------------------------------------------------------------------

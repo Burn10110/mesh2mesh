@@ -29,6 +29,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import NO_MATERIAL, Material, Mesh, Node, Scene, Texture
+from ..i18n import tr
 
 BINARY_MAGIC = b"Kaydara FBX Binary  \x00"
 C3 = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)   # scene -> written file
@@ -79,21 +80,21 @@ def _parse_binary(data):
             if enc == 1:
                 raw = zlib.decompress(raw)
             elif enc != 0:
-                raise ValueError(f"FBX: неизвестное сжатие массива ({enc})")
+                raise ValueError(tr("FBX: неизвестное сжатие массива ({enc})", enc=enc))
             return np.frombuffer(raw, dtype=_ARRAY[t], count=n), pos + clen
         if t in (b"S", b"R"):
             n = struct.unpack_from("<I", data, pos)[0]
             pos += 4
             raw = bytes(data[pos:pos + n])
             return (raw.decode("utf-8", "replace") if t == b"S" else raw), pos + n
-        raise ValueError(f"FBX: неизвестный тип значения {t!r} по смещению {pos - 1}")
+        raise ValueError(tr("FBX: неизвестный тип значения {t!r} по смещению {v}", t=t, v=pos - 1))
 
     def read_node(pos):
         end, nprops, _plen, nlen = head.unpack_from(data, pos)
         if end == 0:
             return None, pos + head.size + nlen
         if end > len(data):
-            raise ValueError("FBX: файл обрезан")
+            raise ValueError(tr("FBX: файл обрезан"))
         pos += head.size
         node = _Node(bytes(data[pos:pos + nlen]).decode("ascii", "replace"))
         pos += nlen
@@ -138,8 +139,8 @@ def _parse_ascii(text):
     while pos < n:
         m = _TOKEN.match(text, pos)
         if not m:
-            raise ValueError(f"FBX (ASCII): не разобрать текст у смещения {pos}: "
-                             f"{text[pos:pos + 30]!r}")
+            raise ValueError(tr("FBX (ASCII): не разобрать текст у смещения {pos}: {v!r}",
+                                pos=pos, v=text[pos:pos + 30]))
         pos = m.end()
         if m.lastgroup:
             toks.append((m.lastgroup, m.group(m.lastgroup)))
@@ -182,17 +183,17 @@ def _parse_ascii(text):
             kind, val = toks[i]
             if kind == "punct" and val == "}":
                 if not closing:
-                    raise ValueError("FBX (ASCII): лишняя '}'")
+                    raise ValueError(tr("FBX (ASCII): лишняя '}'"))
                 i += 1
                 return
             if kind != "key":
-                raise ValueError(f"FBX (ASCII): ожидалось имя узла, а не {val!r}")
+                raise ValueError(tr("FBX (ASCII): ожидалось имя узла, а не {val!r}", val=val))
             i += 1
             node = _Node(val)
             body(node)
             parent.children.append(node)
         if closing:
-            raise ValueError("FBX (ASCII): не хватает '}'")
+            raise ValueError(tr("FBX (ASCII): не хватает '}'"))
 
     root = _Node("")
     children(root, closing=False)
@@ -211,7 +212,7 @@ def parse(path):
     except UnicodeDecodeError:
         text = data.decode("latin-1")
     if "FBXHeaderExtension" not in text[:4096]:
-        raise ValueError("FBX: не FBX-файл (нет заголовка)")
+        raise ValueError(tr("FBX: не FBX-файл (нет заголовка)"))
     return _parse_ascii(text)
 
 
@@ -344,8 +345,8 @@ class _Reader:
         self.path, self.folder = path, os.path.dirname(os.path.abspath(path))
         self.version, self.root = parse(path)
         if self.version and self.version < 7000:
-            raise ValueError(f"FBX {self.version / 1000:.1f}: поддерживаются FBX 7.x (2011+) — "
-                             "пересохраните файл в новой версии")
+            raise ValueError(tr("FBX {v:.1f}: поддерживаются FBX 7.x (2011+) — пересохраните "
+                                "файл в новой версии", v=self.version / 1000))
         self.scene = Scene()
         self.tmpl = _templates(self.root)
         gs = _props70(self.root.find("GlobalSettings"))
@@ -360,7 +361,7 @@ class _Reader:
     def run(self):
         objs = self.root.find("Objects")
         if objs is None:
-            raise ValueError("FBX: нет раздела Objects")
+            raise ValueError(tr("FBX: нет раздела Objects"))
         self.obj, kind, order = {}, {}, {}
         for i, n in enumerate(objs.children):
             if n.props:
@@ -406,10 +407,10 @@ class _Reader:
                             self.embedded.setdefault(textures.base_name(ref).lower(), data)
         self.tex_of, self.tex_by_data = {}, {}
         if deformed:
-            self.warn("FBX: скиннинг и blend shapes не переносятся (взята исходная форма)")
+            self.warn(tr("FBX: скиннинг и blend shapes не переносятся (взята исходная форма)"))
         if anim or any(k == "AnimationCurve" and len(np.atleast_1d(n.value("KeyTime", []))) > 1
                        for k, n in ((kind[u], self.obj[u]) for u in self.obj)):
-            self.warn("FBX: анимация не переносится (взята поза из файла)")
+            self.warn(tr("FBX: анимация не переносится (взята поза из файла)"))
         models = sorted((u for u in self.obj if kind[u] == "Model"), key=order.get)
         kids = {}
         roots = []
@@ -423,7 +424,7 @@ class _Reader:
 
     def node(self, uid, stack=()):
         if uid in stack:
-            raise ValueError("FBX: циклическая иерархия объектов")
+            raise ValueError(tr("FBX: циклическая иерархия объектов"))
         n = self.obj[uid]
         p = self.mprops[uid]
         name = _split_name(n.props[1]) if len(n.props) > 1 else ""
@@ -432,21 +433,21 @@ class _Reader:
         if it != 1 and stack:
             s = np.linalg.norm(local_matrix(self.mprops[stack[-1]])[:3, :3], axis=0)
             if (it == 0 and np.ptp(s) > 1e-9 * s.max()) or (it == 2 and np.abs(s - 1).max() > 1e-9):
-                self.warn(f"FBX: «{name}»: наследование масштаба InheritType {it} заменено "
-                          "обычным (RSrs) — форма под неравномерным масштабом родителя может "
-                          "отличаться")
+                self.warn(tr("FBX: «{name}»: наследование масштаба InheritType {it} заменено "
+                             "обычным (RSrs) — форма под неравномерным масштабом родителя может "
+                             "отличаться", name=name, it=it))
         node = Node(name or "node", self.A4 @ local_matrix(p) @ self.A4.T)
         geos = [g for g in self.geos.get(uid, []) if g in self.obj]
         meshes = [g for g in geos if self.obj[g].props[2:3] == ["Mesh"]]
         other = {str(self.obj[g].props[2]) for g in geos if g not in meshes and
                  len(self.obj[g].props) > 2 and self.obj[g].props[2] != "Shape"}
         if other:
-            self.warn(f"FBX: не меши не переносятся: {', '.join(sorted(other))}")
+            self.warn(tr("FBX: не меши не переносятся: {v}", v=', '.join(sorted(other))))
         elif not geos and mtype in ("Camera", "Light"):
-            self.warn(f"FBX: {'камеры' if mtype == 'Camera' else 'источники света'} "
-                      "не переносятся (оставлены пустыми узлами)")
+            self.warn(tr("FBX: {v} не переносятся (оставлены пустыми узлами)",
+                         v=tr('камеры') if mtype == 'Camera' else tr('источники света')))
         if len(meshes) > 1:
-            self.warn(f"FBX: «{name}»: у объекта несколько геометрий — взята первая")
+            self.warn(tr("FBX: «{name}»: у объекта несколько геометрий — взята первая", name=name))
         if meshes:
             node.mesh = self.mesh(meshes[0], uid, name)
         node.children = [self.node(c, stack + (uid,)) for c in self.kids.get(uid, [])]
@@ -473,10 +474,10 @@ class _Reader:
                     continue
                 if prop not in ("DiffuseColor", "Diffuse", "Maya|baseColor", "Maya|TEX_color_map",
                                 "3dsMax|Parameters|base_color_map"):
-                    self.warn("FBX: переносится только текстура цвета (карты нормалей, "
-                              "блеска, прозрачности и прочие — нет)")
+                    self.warn(tr("FBX: переносится только текстура цвета (карты нормалей, "
+                                 "блеска, прозрачности и прочие — нет)"))
                 elif self.obj[tid].name == "LayeredTexture":
-                    self.warn(f"FBX: «{name}»: многослойная текстура не переносится")
+                    self.warn(tr("FBX: «{name}»: многослойная текстура не переносится", name=name))
                 elif tex is None:
                     tex = self.texture(tid)
             self.mat_of[uid] = len(self.scene.materials)
@@ -506,8 +507,8 @@ class _Reader:
                 if tex is not None:
                     break
             if tex is None:
-                self.warn(f"FBX: текстура «{name}» не вшита и не найдена рядом с файлом — "
-                          "отброшена")
+                self.warn(tr("FBX: текстура «{name}» не вшита и не найдена рядом с файлом — "
+                             "отброшена", name=name))
             else:
                 if "." not in tex.name:
                     k = textures.kind(tex.data, tex.name)
@@ -519,7 +520,8 @@ class _Reader:
                      or any(abs(float(x)) > 1e-9 for x in np.atleast_1d(p.get("Rotation", 0)))
                      or any(abs(float(x) - 1) > 1e-9 for x in np.atleast_1d(p.get("Scaling", 1))))
             if tex is not None and moved:
-                self.warn(f"FBX: сдвиг/поворот/масштаб UV текстуры «{name}» не переносится")
+                self.warn(tr("FBX: сдвиг/поворот/масштаб UV текстуры «{name}» не переносится",
+                             name=name))
             self.tex_of[tid] = tex
         return self.tex_of[tid]
 
@@ -532,7 +534,8 @@ class _Reader:
             return None
         vals = np.asarray(raw, dtype=np.float64)
         if len(vals) % width:
-            self.warn(f"FBX: «{name}»: слой {elem.name} повреждён — отброшен")
+            self.warn(tr("FBX: «{name}»: слой {name2} повреждён — отброшен",
+                         name=name, name2=elem.name))
             return None
         vals = vals.reshape(-1, width)
         corners, sizes = geo
@@ -545,18 +548,21 @@ class _Reader:
         elif mapping == "AllSame":
             key = np.zeros(len(corners), dtype=np.int64)
         else:
-            self.warn(f"FBX: «{name}»: {elem.name} с привязкой {mapping} не переносится")
+            self.warn(tr("FBX: «{name}»: {name2} с привязкой {mapping} не переносится",
+                         name=name, name2=elem.name, mapping=mapping))
             return None
         if ref in ("IndexToDirect", "Index"):
             idx = elem.value(index)
             if idx is not None:
                 idx = np.asarray(idx, dtype=np.int64)
                 if len(key) and key.max() >= len(idx):
-                    self.warn(f"FBX: «{name}»: слой {elem.name} короче меша — отброшен")
+                    self.warn(tr("FBX: «{name}»: слой {name2} короче меша — отброшен",
+                                 name=name, name2=elem.name))
                     return None
                 key = idx[key]
         if len(key) and (key.min() < 0 or key.max() >= len(vals)):
-            self.warn(f"FBX: «{name}»: слой {elem.name} ссылается за пределы — отброшен")
+            self.warn(tr("FBX: «{name}»: слой {name2} ссылается за пределы — отброшен",
+                         name=name, name2=elem.name))
             return None
         return vals[key]
 
@@ -572,7 +578,7 @@ class _Reader:
         v = np.asarray(n.value("Vertices", np.zeros(0)), dtype=np.float64)
         pvi = np.asarray(n.value("PolygonVertexIndex", np.zeros(0)), dtype=np.int64)
         if len(v) % 3:
-            raise ValueError(f"FBX: «{name}»: число координат вершин не кратно 3")
+            raise ValueError(tr("FBX: «{name}»: число координат вершин не кратно 3", name=name))
         pos = v.reshape(-1, 3)
         if len(pvi) and pvi[-1] >= 0:
             pvi = np.r_[pvi[:-1], ~pvi[-1]]                  # unterminated last polygon
@@ -580,16 +586,17 @@ class _Reader:
         sizes = np.diff(np.r_[-1, ends])
         corners = np.where(pvi < 0, ~pvi, pvi)
         if len(corners) and (corners.max() >= len(pos)):
-            raise ValueError(f"FBX: «{name}»: индекс вершины вне диапазона")
+            raise ValueError(tr("FBX: «{name}»: индекс вершины вне диапазона", name=name))
         geo = (corners, sizes)
         attrs = {}
         for tag, values, index, width, what in (
-                ("LayerElementNormal", "Normals", "NormalsIndex", 3, "нормалей"),
-                ("LayerElementUV", "UV", "UVIndex", 2, "UV-каналов"),
-                ("LayerElementColor", "Colors", "ColorIndex", 4, "наборов цветов вершин")):
+                ("LayerElementNormal", "Normals", "NormalsIndex", 3, tr("нормалей")),
+                ("LayerElementUV", "UV", "UVIndex", 2, tr("UV-каналов")),
+                ("LayerElementColor", "Colors", "ColorIndex", 4, tr("наборов цветов вершин"))):
             elems = n.findall(tag)
             if len(elems) > 1:
-                self.warn(f"FBX: «{name}»: {len(elems)} {what} — переносится только первый")
+                self.warn(tr("FBX: «{name}»: {n_elems} {what} — переносится только первый",
+                             name=name, n_elems=len(elems), what=what))
             if elems:
                 attrs[tag] = self.layer(geo, elems[0], values, index, width, name)
         nrm, uv, col = (attrs.get(k) for k in ("LayerElementNormal", "LayerElementUV",
@@ -598,11 +605,11 @@ class _Reader:
                  "LayerElementMaterial"} | DERIVED_LAYERS
         extra = sorted({c.name for c in n.children if c.name.startswith("LayerElement")} - known)
         if extra:
-            self.warn(f"FBX: слои не переносятся: {', '.join(extra)}")
+            self.warn(tr("FBX: слои не переносятся: {v}", v=', '.join(extra)))
         sm = n.find("LayerElementSmoothing")
         if nrm is None and sm is not None and np.any(np.asarray(sm.value("Smoothing", [0]))):
             # all-zero groups = faceted, which is what a mesh without normals means here
-            self.warn(f"FBX: «{name}»: группы сглаживания без нормалей не переносятся")
+            self.warn(tr("FBX: «{name}»: группы сглаживания без нормалей не переносятся", name=name))
         fm = None
         if mats:
             local = np.zeros(len(sizes), dtype=np.int64)
@@ -614,14 +621,14 @@ class _Reader:
                     local = arr[:len(sizes)]
                 elif len(arr):
                     if mapping != "AllSame":
-                        self.warn(f"FBX: «{name}»: материалы с привязкой {mapping} — "
-                                  "взят первый на весь меш")
+                        self.warn(tr("FBX: «{name}»: материалы с привязкой {mapping} — взят "
+                                     "первый на весь меш", name=name, mapping=mapping))
                     local[:] = arr[0]
             table = np.array([self.material(m) for m in mats] + [-1], dtype=np.int64)
             fm = table[np.where((local >= 0) & (local < len(mats)), local, len(mats))]
         keep = sizes >= 3
         if not keep.all():
-            self.warn(f"FBX: «{name}»: рёбра и точки без граней отброшены")
+            self.warn(tr("FBX: «{name}»: рёбра и точки без граней отброшены", name=name))
             cmask = np.repeat(keep, sizes)
             corners, sizes = corners[cmask], sizes[keep]
             nrm, uv, col = (a[cmask] if a is not None else None for a in (nrm, uv, col))
@@ -686,7 +693,7 @@ def _pack(v):
         if len(raw) > 128:
             raw, enc = zlib.compress(raw), 1
         return code + struct.pack("<III", v.size, enc, len(raw)) + raw
-    raise TypeError(f"FBX: не записать значение типа {type(v)}")
+    raise TypeError(tr("FBX: не записать значение типа {v}", v=type(v)))
 
 
 class Rec:
@@ -710,7 +717,7 @@ class Rec:
     def emit(self, out):
         end = len(out) + self.size()
         if end >= 2 ** 32:
-            raise ValueError("FBX 7400: файл больше 4 ГБ не записать")
+            raise ValueError(tr("FBX 7400: файл больше 4 ГБ не записать"))
         out += struct.pack("<IIIB", end, self.nprops, len(self.props), len(self.name))
         out += self.name + self.props
         for c in self.children:
@@ -1098,8 +1105,8 @@ class _Writer:
             residual = C3.T @ k @ C3                       # back to scene axes
             nonortho = np.abs(k - np.eye(3)).max()
             if nonortho > 1e-4:
-                self.loss("FBX: трансформ со сдвигом (shear) перенесён в точки геометрии "
-                          "и в дочерние узлы")
+                self.loss(tr("FBX: трансформ со сдвигом (shear) перенесён в точки геометрии и в "
+                             "дочерние узлы"))
         rows = [("RotationActive", "bool", "", "", 1), ("InheritType", "enum", "", "", 1),
                 ("ScalingMax", "Vector3D", "Vector", "", 0, 0, 0),
                 ("DefaultAttributeIndex", "int", "Integer", "", 0)]
@@ -1118,7 +1125,7 @@ class _Writer:
             if m.n_faces:
                 geo = self.geometry(node.mesh, residual)
             else:
-                self.loss("FBX: пустые меши (без граней) записаны пустыми узлами")
+                self.loss(tr("FBX: пустые меши (без граней) записаны пустыми узлами"))
         if geo is not None:
             rows.append(("currentUVSet", "KString", "", "U", "map1"))
         uid = self.next_uid()

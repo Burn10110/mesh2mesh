@@ -14,6 +14,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import NO_MATERIAL, Material, Mesh, Node, Scene
+from ..i18n import tr
 
 # scene (Z up) -> OBJ (Y up): (x, y, z) -> (x, z, -y); the inverse for reading
 TO_OBJ = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
@@ -55,7 +56,7 @@ def _read_mtl(path, scene, warned, tex_cache):
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        scene.warn(f"OBJ: библиотека материалов не найдена: {os.path.basename(path)}")
+        scene.warn(tr("OBJ: библиотека материалов не найдена: {v}", v=os.path.basename(path)))
         return mats
     with fh:
         for line in fh:
@@ -78,12 +79,12 @@ def _read_mtl(path, scene, warned, tex_cache):
                 ref, opts = _map_args(line.strip().split()[1:])
                 if any(o in opts and any(float(v) != d for v in opts[o])
                        for o, d in (("-o", 0.0), ("-s", 1.0))):
-                    scene.warn(f"OBJ: сдвиг/масштаб UV текстуры «{ref}» не переносится")
+                    scene.warn(tr("OBJ: сдвиг/масштаб UV текстуры «{ref}» не переносится", ref=ref))
                 key = ref.replace("\\", "/").lower()
                 if key not in tex_cache:
                     tex = textures.load_file(ref, folder)
                     if tex is None:
-                        scene.warn(f"OBJ: нет файла текстуры {ref} — текстура отброшена")
+                        scene.warn(tr("OBJ: нет файла текстуры {ref} — текстура отброшена", ref=ref))
                     else:   # one image under several spellings -> one Texture
                         tex = next((t for t in tex_cache.values()
                                     if t is not None and t.data == tex.data), tex)
@@ -91,8 +92,8 @@ def _read_mtl(path, scene, warned, tex_cache):
                 mats[name][1] = tex_cache[key]
             elif key in OTHER_MAPS and "map" not in warned:
                 warned.add("map")
-                scene.warn("OBJ: переносится только текстура цвета map_Kd (карты нормалей, "
-                           "блеска, прозрачности — нет)")
+                scene.warn(tr("OBJ: переносится только текстура цвета map_Kd (карты нормалей, "
+                              "блеска, прозрачности — нет)"))
     return mats
 
 
@@ -130,7 +131,7 @@ class _State:
                 self.mat_index[name] = len(scene.materials)
                 rgba, tex = self.mtl.get(name, (None, None))
                 if rgba is None:
-                    scene.warn(f"OBJ: материал «{name}» не описан в .mtl — без цвета")
+                    scene.warn(tr("OBJ: материал «{name}» не описан в .mtl — без цвета", name=name))
                 scene.materials.append(Material(name, tuple(rgba) if rgba else None, tex))
             self.cur_mat = self.mat_index[name]
         elif k == "mtllib":
@@ -138,12 +139,12 @@ class _State:
                 self.mtl.update(_read_mtl(os.path.join(os.path.dirname(self.path), lib), scene,
                                           self.warned, self.tex_cache))
         elif k in ("l", "p", "curv", "curv2", "surf", "cstype"):
-            scene.warn("OBJ: линии, точки и кривые/поверхности отброшены")
+            scene.warn(tr("OBJ: линии, точки и кривые/поверхности отброшены"))
         elif k in ("s", "vp"):
             pass
         elif k not in self.warned:
             self.warned.add(k)
-            scene.warn(f"OBJ: неизвестная директива «{k}» пропущена")
+            scene.warn(tr("OBJ: неизвестная директива «{k}» пропущена", k=k))
 
 
 def read(path):
@@ -162,7 +163,8 @@ def _read_lines(path):
         i = int(tok)
         i = i - 1 if i > 0 else n + i
         if not 0 <= i < n:
-            raise ValueError(f"OBJ: строка {line_no}: индекс {tok} вне диапазона")
+            raise ValueError(tr("OBJ: строка {line_no}: индекс {tok} вне диапазона",
+                                line_no=line_no, tok=tok))
         return i
 
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -535,9 +537,11 @@ def _finish(st, V, VT, VN, col):
         vt, vn = np.array(o.vt), np.array(o.vn)
         mat = np.array(o.mat, dtype=np.int64)
         if np.any(vt < 0) and np.any(vt >= 0):
-            scene.warn(f"OBJ: «{o.name}»: UV есть не у всех граней — недостающие = (0, 0)")
+            scene.warn(tr("OBJ: «{name}»: UV есть не у всех граней — недостающие = (0, 0)",
+                          name=o.name))
         if np.any(vn < 0) and np.any(vn >= 0):
-            scene.warn(f"OBJ: «{o.name}»: нормали есть не у всех граней — нормали отброшены")
+            scene.warn(tr("OBJ: «{name}»: нормали есть не у всех граней — нормали отброшены",
+                          name=o.name))
         mesh = Mesh(o.name, V[used], np.array(o.sizes, dtype=np.int64), corners.astype(np.int64),
                     face_material=mat if np.any(mat >= 0) else None,
                     uv=np.where((vt >= 0)[:, None], VT[np.maximum(vt, 0)], 0.0) if np.any(vt >= 0) else None,
@@ -555,21 +559,22 @@ def _mtl_name(name):
 def losses(scene):
     w = []
     if not scene.is_flat():
-        w.append("OBJ: иерархия и инстансы запечены в вершины (объекты плоским списком)")
+        w.append(tr("OBJ: иерархия и инстансы запечены в вершины (объекты плоским списком)"))
     if any(not scene.meshes[n.mesh].n_faces for n, _ in scene.instances()):
-        w.append("OBJ: пустые меши (без граней) отброшены")
+        w.append(tr("OBJ: пустые меши (без граней) отброшены"))
     coloured = [m for m in scene.meshes if m.colors is not None]
     per_vertex = [_per_vertex(m) for m in coloured]
     if any(c is None for c in per_vertex):
-        w.append("OBJ: цвета на углах граней (разные у одной вершины) отброшены")
+        w.append(tr("OBJ: цвета на углах граней (разные у одной вершины) отброшены"))
     if any(c is not None for c in per_vertex):
-        w.append("OBJ: цвета вершин записаны неофициальным «v x y z r g b» (Blender, MeshLab читают)")
+        w.append(tr("OBJ: цвета вершин записаны неофициальным «v x y z r g b» (Blender, MeshLab "
+                    "читают)"))
         if any(c is not None and np.any(c[:, 3] < 1) for c in per_vertex):
-            w.append("OBJ: прозрачность цветов вершин отброшена")
+            w.append(tr("OBJ: прозрачность цветов вершин отброшена"))
     if any(m.uv is None and m.face_material is not None
            and any(scene.materials[i].texture is not None for i in set(m.face_material.tolist())
                    if i >= 0) for m in scene.meshes):
-        w.append("OBJ: у части объектов с текстурой нет UV — текстура на них не ляжет")
+        w.append(tr("OBJ: у части объектов с текстурой нет UV — текстура на них не ляжет"))
     return w
 
 

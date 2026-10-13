@@ -10,7 +10,8 @@ import argparse
 import os
 import sys
 
-from . import __url__, __version__, convert, formats, geom
+from . import __url__, __version__, convert, formats, geom, i18n
+from .i18n import tr
 
 
 def _utf8_output():
@@ -25,21 +26,35 @@ def _utf8_output():
 
 def main(argv=None):
     _utf8_output()
+    argv = sys.argv[1:] if argv is None else list(argv)
+    lang = i18n.pre_parse_lang(argv)
+    if lang:
+        i18n.set_lang(lang)                     # before argparse: --help is translated too
     prog = "mesh2mesh-cli" if getattr(sys, "frozen", False) else "mesh2mesh"  # exe vs -m
-    ap = argparse.ArgumentParser(prog=prog, description=__doc__.split("\n\n")[1].strip())
-    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__} · автор: {__url__}")
-    ap.add_argument("input", help=f"входной файл: {', '.join(sorted(formats.READERS))}")
-    ap.add_argument("-o", "--out", help=f"выходной файл: {', '.join(sorted(formats.WRITERS))}")
-    ap.add_argument("--info", action="store_true", help="только показать содержимое файла")
+    ap = argparse.ArgumentParser(
+        prog=prog, description=tr("Конвертирует mesh-форматы, перечисляет всё, что целевой формат "
+                                  "не может хранить, затем читает результат своим ридером и "
+                                  "сверяет треугольники, габарит, площадь и объём. Код выхода 1 — "
+                                  "проверка чтением не прошла, 2 — неверный ввод."))
+    ap.add_argument("--version", action="version",
+                    version=tr("{prog} {version} · автор: {url}", prog=prog, version=__version__,
+                               url=__url__))
+    ap.add_argument("input", help=tr("входной файл: {exts}", exts=", ".join(sorted(formats.READERS))))
+    ap.add_argument("-o", "--out",
+                    help=tr("выходной файл: {exts}", exts=", ".join(sorted(formats.WRITERS))))
+    ap.add_argument("--info", action="store_true", help=tr("только показать содержимое файла"))
     ap.add_argument("--units", choices=convert.UNITS,
-                    help="единицы координат в OBJ/STL на выходе (по умолчанию — как у исходника)")
+                    help=tr("единицы координат в OBJ/STL на выходе (по умолчанию — как у исходника)"))
     ap.add_argument("--in-units", choices=convert.UNITS, default="mm",
-                    help="единицы исходника без единиц в формате (OBJ/STL), по умолчанию mm")
-    ap.add_argument("--scale", type=float, default=1.0, help="умножить модель (от начала координат)")
+                    help=tr("единицы исходника без единиц в формате (OBJ/STL), по умолчанию mm"))
+    ap.add_argument("--scale", type=float, default=1.0,
+                    help=tr("умножить модель (от начала координат)"))
     ap.add_argument("--rotate", default="",
-                    help="четверть-обороты вокруг мировых осей слева направо: x90 или x-90,z180")
+                    help=tr("четверть-обороты вокруг мировых осей слева направо: x90 или x-90,z180"))
     ap.add_argument("--ascii", "--stl-ascii", dest="ascii", action="store_true",
-                    help="STL/PLY текстом (STL так сохраняет имена объектов), иначе binary")
+                    help=tr("STL/PLY текстом (STL так сохраняет имена объектов), иначе binary"))
+    ap.add_argument("--lang", choices=i18n.LANGS,
+                    help=tr("язык сообщений: ru, en (по умолчанию — язык Windows или M2M_LANG)"))
     a = ap.parse_args(argv)
 
     try:
@@ -47,9 +62,9 @@ def main(argv=None):
     except ValueError as e:
         ap.error(str(e))
     if a.scale <= 0:
-        ap.error("--scale должен быть положительным")
+        ap.error(tr("--scale должен быть положительным"))
     if not os.path.isfile(a.input):
-        ap.error(f"нет файла {a.input}")
+        ap.error(tr("нет файла {path}", path=a.input))
 
     try:
         if a.info:
@@ -63,7 +78,7 @@ def main(argv=None):
                 print("WARNING:", w)
             return 0
         if not a.out:
-            ap.error("укажите -o выходной файл или --info")
+            ap.error(tr("укажите -o выходной файл или --info"))
         out = os.path.abspath(a.out)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         out_ext = os.path.splitext(out)[1].lower()

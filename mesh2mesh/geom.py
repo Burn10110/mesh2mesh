@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .i18n import tr
+
 AXES = "xyz"
 
 
@@ -393,9 +395,10 @@ class Stats:
         k = 1.0 / unit_m
         size = (self.bbox_max - self.bbox_min) * k
         f = lambda v: " ".join(f"{x:.4f}" for x in v)
-        return [f"объектов {self.objects}, треугольников {self.triangles}",
-                f"габарит ({unit_name}): [{f(self.bbox_min * k)}] .. [{f(self.bbox_max * k)}], "
-                f"размер [{f(size)}]"]
+        return [tr("объектов {objects}, треугольников {tris}", objects=self.objects,
+                   tris=self.triangles),
+                tr("габарит ({unit}): [{lo}] .. [{hi}], размер [{size}]", unit=unit_name,
+                   lo=f(self.bbox_min * k), hi=f(self.bbox_max * k), size=f(size))]
 
 
 def stats(scene):
@@ -419,16 +422,17 @@ def compare(src, dst, float32=False):
     """Read-back verdict: list of mismatch descriptions (empty = OK)."""
     bad = []
     if src.triangles != dst.triangles:
-        bad.append(f"треугольников {src.triangles} -> {dst.triangles}")
+        bad.append(tr("треугольников {a} -> {b}", a=src.triangles, b=dst.triangles))
     ext = max(np.abs(np.r_[src.bbox_min, src.bbox_max]).max(), 1e-12)
     tol = ext * (1e-6 if float32 else 1e-8)
     for nm, a, b in (("min", src.bbox_min, dst.bbox_min), ("max", src.bbox_max, dst.bbox_max)):
         if np.abs(a - b).max() > tol:
-            bad.append(f"габарит {nm} {a} -> {b}")
+            bad.append(tr("габарит {nm} {a} -> {b}", nm=nm, a=a, b=b))
     rel = 1e-4 if float32 else 1e-6
     if abs(src.area - dst.area) > rel * max(src.area, 1e-30):
-        bad.append(f"площадь {src.area:.6g} -> {dst.area:.6g} м²")
+        bad.append(tr("площадь {a:.6g} -> {b:.6g} м²", a=src.area, b=dst.area))
     vref = max(abs(src.volume), src.area * ext * 1e-3, 1e-30)
     if abs(src.volume - dst.volume) > rel * vref:
-        bad.append(f"объём {src.volume:.6g} -> {dst.volume:.6g} м³ (знак = ориентация граней)")
+        bad.append(tr("объём {a:.6g} -> {b:.6g} м³ (знак = ориентация граней)", a=src.volume,
+                      b=dst.volume))
     return bad

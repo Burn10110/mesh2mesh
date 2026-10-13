@@ -15,6 +15,7 @@ import numpy as np
 
 from .. import geom, textures
 from ..model import Mesh, Node, Scene
+from ..i18n import tr
 
 TYPES = {"char": "i1", "int8": "i1", "uchar": "u1", "uint8": "u1", "short": "i2", "int16": "i2",
          "ushort": "u2", "uint16": "u2", "int": "i4", "int32": "i4", "uint": "u4", "uint32": "u4",
@@ -39,7 +40,7 @@ class _Element:
 def _header(data):
     end = re.search(rb"end_header[ \t]*\r?\n", data)
     if not data.startswith(b"ply") or end is None:
-        raise ValueError("PLY: нет заголовка ply … end_header")
+        raise ValueError(tr("PLY: нет заголовка ply … end_header"))
     fmt, elements = None, []
     for line in data[:end.start()].decode("ascii", "replace").splitlines()[1:]:
         t = line.split()
@@ -56,9 +57,9 @@ def _header(data):
                 else:
                     elements[-1].props.append((t[2], TYPES[t[1]]))
             except (KeyError, IndexError):
-                raise ValueError(f"PLY: непонятное свойство: {line.strip()}") from None
+                raise ValueError(tr("PLY: непонятное свойство: {v}", v=line.strip())) from None
     if fmt not in ("ascii", "binary_little_endian", "binary_big_endian"):
-        raise ValueError(f"PLY: неизвестный формат {fmt!r}")
+        raise ValueError(tr("PLY: неизвестный формат {fmt!r}", fmt=fmt))
     return fmt, elements, end.end()
 
 
@@ -127,7 +128,7 @@ def _read_binary(el, data, off, bo):
             if isinstance(t, tuple):
                 k = int(np.frombuffer(data, bo + t[0], 1, off)[0])
                 if k < 0:
-                    raise ValueError(f"PLY: отрицательная длина списка {n} ({k})")
+                    raise ValueError(tr("PLY: отрицательная длина списка {n} ({k})", n=n, k=k))
                 off += np.dtype(t[0]).itemsize
                 out[n].append(np.frombuffer(data, bo + t[1], k, off))
                 off += np.dtype(t[1]).itemsize * k
@@ -178,7 +179,7 @@ def _read_ascii(el, tok, pos):
             if isinstance(t, tuple):
                 k = int(tok[pos])
                 if k < 0:
-                    raise ValueError(f"PLY: отрицательная длина списка {n} ({k})")
+                    raise ValueError(tr("PLY: отрицательная длина списка {n} ({k})", n=n, k=k))
                 if pos + 1 + k > len(tok):
                     raise IndexError("list runs past the end of the file")
                 out[n].append(np.array(tok[pos + 1:pos + 1 + k]).astype(np.float64))
@@ -244,17 +245,18 @@ def read(path):
         except (ValueError, IndexError) as e:     # short file, bad numbers: numpy's words
             if str(e).startswith("PLY:"):
                 raise
-            raise ValueError(f"PLY: данные элемента «{el.name}» повреждены или обрезаны "
-                             f"({e})") from None
+            raise ValueError(tr("PLY: данные элемента «{name}» повреждены или обрезаны ({e})",
+                                name=el.name, e=e)) from None
     types = {el.name: {n: (t[1] if isinstance(t, tuple) else t) for n, t in el.props}
              for el in elements}
     for el in elements:
         if el.name not in ("vertex", "face"):
-            scene.warn(f"PLY: элемент «{el.name}» ({el.count}) не переносится")
+            scene.warn(tr("PLY: элемент «{name}» ({count}) не переносится",
+                          name=el.name, count=el.count))
 
     v = parsed.get("vertex")
     if v is None or not all(k in v for k in "xyz"):
-        raise ValueError("PLY: нет вершин с x y z")
+        raise ValueError(tr("PLY: нет вершин с x y z"))
     used = {"x", "y", "z"}
     pos_ = np.stack([np.asarray(v[k], dtype=np.float64) for k in "xyz"], 1)
     vnorm = None
@@ -271,30 +273,30 @@ def read(path):
             break
     extra = [n for n in v if n not in used]
     if extra:
-        scene.warn(f"PLY: свойства вершин не переносятся: {', '.join(extra)}")
+        scene.warn(tr("PLY: свойства вершин не переносятся: {v}", v=', '.join(extra)))
 
     f = parsed.get("face", {})
     key = next((k for k in ("vertex_indices", "vertex_index") if k in f), None)
     polys = f[key] if key else _List([], np.zeros(0, np.int64))
     if not isinstance(polys, _List):
-        raise ValueError(f"PLY: {key} граней — не список")
+        raise ValueError(tr("PLY: {key} граней — не список", key=key))
     if not len(polys):
-        scene.warn("PLY: нет граней — облако точек не переносится")
+        scene.warn(tr("PLY: нет граней — облако точек не переносится"))
     sizes = polys.counts
     keep = sizes >= 3
     if not np.all(keep):
-        scene.warn(f"PLY: {int(np.sum(~keep))} граней с < 3 вершинами отброшены")
+        scene.warn(tr("PLY: {v} граней с < 3 вершинами отброшены", v=int(np.sum(~keep))))
     corners = polys.flat[np.repeat(keep, sizes)].astype(np.int64)
     sizes = sizes[keep]
     if len(corners) and (corners.min() < 0 or corners.max() >= len(pos_)):
-        raise ValueError("PLY: индекс вершины вне диапазона")
+        raise ValueError(tr("PLY: индекс вершины вне диапазона"))
     colors = vcol[corners] if vcol is not None else None
     uv = vuv[corners] if vuv is not None else None
     fcol, fu = _colour(f, types.get("face", {}), COLOR_NAMES)
     if fcol is not None:
         fcol = np.repeat(fcol[keep], sizes, axis=0)
         if colors is not None:
-            scene.warn("PLY: есть цвета и у вершин, и у граней — взяты цвета вершин")
+            scene.warn(tr("PLY: есть цвета и у вершин, и у граней — взяты цвета вершин"))
         else:
             colors = fcol
     ftex = f.get("texcoord")
@@ -303,10 +305,10 @@ def read(path):
             uv = (ftex.flat[np.repeat(keep, ftex.counts)].astype(np.float64).reshape(-1, 2)
                   if len(sizes) else None)
         else:
-            scene.warn("PLY: texcoord граней не совпадает с числом вершин — UV отброшены")
+            scene.warn(tr("PLY: texcoord граней не совпадает с числом вершин — UV отброшены"))
     extra = [n for n in f if n not in {key, "texcoord"} | fu]
     if extra:
-        scene.warn(f"PLY: свойства граней не переносятся: {', '.join(extra)}")
+        scene.warn(tr("PLY: свойства граней не переносятся: {v}", v=', '.join(extra)))
 
     name = os.path.splitext(os.path.basename(path))[0]
     scene.meshes.append(Mesh(name, pos_, sizes, corners, uv=uv,
@@ -323,11 +325,11 @@ def _gather(scene, scale):
     w = []
     baked = [b for b in geom.bake(scene)]
     if len(baked) > 1:
-        w.append(f"PLY: объекты ({len(baked)}) слиты в один, имена потеряны")
+        w.append(tr("PLY: объекты ({n_baked}) слиты в один, имена потеряны", n_baked=len(baked)))
     if not scene.is_flat():
-        w.append("PLY: иерархия и инстансы запечены в вершины")
+        w.append(tr("PLY: иерархия и инстансы запечены в вершины"))
     if any(not b.mesh.n_faces for b in baked):
-        w.append("PLY: пустые меши (без граней) отброшены")
+        w.append(tr("PLY: пустые меши (без граней) отброшены"))
     has_uv = [b.mesh.uv is not None for b in baked]
     has_n = [b.mesh.normals is not None for b in baked]
     has_c = [b.mesh.colors is not None for b in baked]
@@ -337,16 +339,16 @@ def _gather(scene, scale):
     use_uv, use_n = bool(baked) and all(has_uv), bool(baked) and all(has_n)
     use_c = any(has_c) or any(has_m)
     if any(has_uv) and not use_uv:
-        w.append("PLY: UV есть не у всех объектов — отброшены")
+        w.append(tr("PLY: UV есть не у всех объектов — отброшены"))
     if any(has_n) and not use_n:
-        w.append("PLY: нормали есть не у всех объектов — отброшены")
+        w.append(tr("PLY: нормали есть не у всех объектов — отброшены"))
     if any(has_m):
-        w.append("PLY: материалов нет в формате — их цвета записаны цветами вершин")
+        w.append(tr("PLY: материалов нет в формате — их цвета записаны цветами вершин"))
     if textures.used_textures(scene):
-        w.append("PLY: текстуры отброшены (формат их не хранит)")
+        w.append(tr("PLY: текстуры отброшены (формат их не хранит)"))
     if any(has_c) and any(c and m for c, m in zip(has_c, has_m)) and not all(
             geom.colors_redundant(b.mesh, scene.materials) for b in baked):
-        w.append("PLY: где есть и цвета вершин, и материал — взяты цвета вершин")
+        w.append(tr("PLY: где есть и цвета вершин, и материал — взяты цвета вершин"))
     pos, sizes, corners, uv, nrm, col = [], [], [], [], [], []
     base = 0
     for b in baked:
@@ -455,5 +457,5 @@ def write(scene, path, scale=1.0, unit_m=None, binary=True):
                 fh.write((text % tuple(corners[c:c + n].tolist())).encode("ascii"))
                 c += n
     if d["col"] is not None and np.any(np.abs(np.round(d["col"] * 255) / 255 - d["col"]) > 1 / 510):
-        w.append("PLY: цвета округлены до 8 бит на канал")
+        w.append(tr("PLY: цвета округлены до 8 бит на канал"))
     return w
