@@ -1,5 +1,6 @@
-# docs and notes stay local (README.md for external users would be the exception)
+# docs and notes stay local; README.md is for external users
 *.md
+!/README.md
 docs/
 # check scripts, run artefacts, third-party models
 tools/
