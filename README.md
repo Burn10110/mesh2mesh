@@ -90,6 +90,11 @@ If a file fails to open or the result looks wrong, send the model (with its text
 the log `%LOCALAPPDATA%\mesh2mesh\mesh2mesh.log` and the version number from the window title.
 Author: https://burn10110.carrd.co/
 
+### License
+
+MIT, see [LICENSE](LICENSE). The program bundles Qt for Python (PySide6, LGPL-3.0),
+numpy, pyqtgraph and PyOpenGL under their own licenses.
+
 ---
 
 ## Русский
@@ -177,3 +182,8 @@ python -m venv .venv
 Если файл не открылся или результат выглядит не так, пришлите модель (вместе с картинками текстур),
 журнал `%LOCALAPPDATA%\mesh2mesh\mesh2mesh.log` и номер версии из заголовка окна.
 Автор: https://burn10110.carrd.co/
+
+### Лицензия
+
+MIT, см. [LICENSE](LICENSE). В программу входят Qt for Python (PySide6, LGPL-3.0), numpy,
+pyqtgraph и PyOpenGL под своими лицензиями.
