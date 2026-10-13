@@ -80,3 +80,10 @@ mesh2mesh-cli.exe does the same without a window, for example:
    mesh2mesh-cli.exe model.3mf --info          (only show what is inside)
 All options: mesh2mesh-cli.exe --help   (language: --lang en or --lang ru)
 Exit code 0 — all good, 1 — the result check failed, 2 — bad input.
+
+
+LICENSE
+-------
+mesh2mesh is free software under the MIT license (LICENSE.txt).
+Third-party components (Qt for Python — LGPL-3.0, NumPy, pyqtgraph, PyOpenGL, Python)
+and their license texts: the licenses folder, list in licenses\THIRD-PARTY.txt.

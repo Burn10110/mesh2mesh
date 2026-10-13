@@ -3,8 +3,8 @@ dist/mesh2mesh-<ver>.zip.
 
     .venv/Scripts/python packaging/build.py [--no-test] [--no-zip] [--test-only]
 
-Steps: version resources -> PyInstaller (packaging/mesh2mesh.spec) -> README_EN/RU.txt -> self-test of
-the built programs (not the sources) -> zip. Exit 1 if anything fails.
+Steps: version resources -> PyInstaller (packaging/mesh2mesh.spec) -> README_EN/RU.txt, LICENSE.txt,
+licenses/ -> self-test of the built programs (not the sources) -> zip. Exit 1 if anything fails.
 """
 
 import argparse
@@ -80,6 +80,77 @@ def write_readme():
             f.write(text)
 
 
+# Third-party components inside dist/: (name, pip distribution, license, home, license texts).
+# A text is "dist:<file in the distribution's .dist-info/licenses>", "python:<file in the
+# Python install>" or a file in packaging/licenses/ (texts the wheels do not carry).
+THIRD_PARTY = [
+    ("Python", None, "PSF-2.0", "https://www.python.org/", ["python:LICENSE.txt"]),
+    ("Qt for Python (PySide6, shiboken6) and Qt", "PySide6", "LGPL-3.0",
+     "https://www.qt.io/qt-for-python  (Qt sources: https://download.qt.io/official_releases/qt/)",
+     ["LGPL-3.0.txt", "GPL-3.0.txt"]),
+    ("NumPy", "numpy", "BSD-3-Clause and others (see the file)", "https://numpy.org/",
+     ["dist:LICENSE.txt"]),
+    ("pyqtgraph", "pyqtgraph", "MIT", "https://www.pyqtgraph.org/", ["dist:LICENSE.txt"]),
+    ("PyOpenGL", "PyOpenGL", "BSD-3-Clause", "https://github.com/mcfletch/pyopengl",
+     ["PyOpenGL.txt"]),
+    ("PyInstaller bootloader", "pyinstaller", "GPL-2.0 with the bootloader exception",
+     "https://pyinstaller.org/", ["dist:COPYING.txt"]),
+]
+
+THIRD_PARTY_HEAD = """mesh2mesh {version} - third-party components
+==================================================
+
+mesh2mesh itself is MIT-licensed: LICENSE.txt next to the programs.
+The programs bundle the components below, each under its own license; the license texts
+are in this folder.
+
+Qt and Qt for Python are used under the GNU LGPL v3 as separate dynamic libraries
+(_internal\\PySide6\\*.dll, *.pyd and _internal\\shiboken6): you may replace them with your
+own compatible builds.
+Their source code is available from the Qt project (links below).
+
+"""
+
+
+def _license_source(text, dist):
+    from importlib import metadata
+    if text.startswith("python:"):
+        return os.path.join(sys.base_prefix, text[7:])
+    if text.startswith("dist:"):
+        files = metadata.distribution(dist).files or []
+        name = text[5:]
+        hits = [f for f in files if f.name == name and "licenses" in f.parts]
+        if not hits:
+            raise FileNotFoundError(f"{dist}: no {name} in its .dist-info/licenses")
+        return str(hits[0].locate())
+    return os.path.join(HERE, "licenses", text)
+
+
+def write_licenses():
+    """LICENSE.txt (ours) + licenses/ (THIRD-PARTY.txt and every component's license text)."""
+    from importlib import metadata
+    shutil.copy(os.path.join(ROOT, "LICENSE"), os.path.join(APP, "LICENSE.txt"))
+    out = os.path.join(APP, "licenses")
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    lines = [THIRD_PARTY_HEAD.format(version=__version__)]
+    for name, dist, lic, home, texts in THIRD_PARTY:
+        ver = (metadata.version(dist) if dist
+               else ".".join(map(str, sys.version_info[:3])))
+        files = []
+        for text in texts:
+            src = _license_source(text, dist)
+            stem = (dist or name).split()[0]
+            dst = os.path.basename(text.split(":")[-1])
+            dst = dst if not text.startswith(("dist:", "python:")) else f"{stem}-{dst}"
+            shutil.copy(src, os.path.join(out, dst))
+            files.append(dst)
+        lines.append(f"{name} {ver}\n   License: {lic}\n   Home: {home}\n"
+                     f"   Text: {', '.join(files)}\n\n")
+    with open(os.path.join(out, "THIRD-PARTY.txt"), "w", encoding="utf-8", newline="\r\n") as f:
+        f.write("".join(lines))
+
+
 def make_texture_obj(folder):
     """OBJ with four quads, each mapped with a picture in a format the Qt image plugins decode
     (JPEG, TIFF, WebP, GIF): in the exe they show only if the imageformats plugins came along."""
@@ -140,6 +211,16 @@ def self_test():
         nonlocal ok
         print(("  ok   " if cond else "  FAIL ") + msg, flush=True)
         ok &= bool(cond)
+
+    # licenses travel with the programs: ours and every bundled component's text
+    lic = os.path.join(app, "licenses")
+    third = os.path.join(lic, "THIRD-PARTY.txt")
+    listed = open(third, encoding="utf-8").read() if os.path.exists(third) else ""
+    named = [t.strip() for ln in listed.splitlines() if ln.strip().startswith("Text:")
+             for t in ln.split(":", 1)[1].split(",")]
+    check(os.path.exists(os.path.join(app, "LICENSE.txt")) and len(named) >= len(THIRD_PARTY)
+          and all(os.path.getsize(os.path.join(lic, n)) > 500 for n in named),
+          f"LICENSE.txt + licenses/: {len(named)} license texts")
 
     def run_cli(*args, expect=0):
         t = time.time()
@@ -221,6 +302,7 @@ def main():
         _app = write_icon()  # noqa: F841 - keep the Qt app alive for make_texture_obj
         run_pyinstaller()
         write_readme()
+        write_licenses()
     print(f"built {APP}: {folder_size(APP) / 2**20:.0f} MB", flush=True)
     if not a.no_test and not self_test():
         print("SELF-TEST FAILED")

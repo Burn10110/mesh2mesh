@@ -80,3 +80,10 @@ mesh2mesh-cli.exe делает то же без окна, например:
    mesh2mesh-cli.exe модель.3mf --info          (только показать содержимое)
 Все параметры: mesh2mesh-cli.exe --help   (на английском: --lang en)
 Код выхода 0 — всё хорошо, 1 — проверка результата не прошла, 2 — ошибка входа.
+
+
+ЛИЦЕНЗИЯ
+--------
+mesh2mesh — свободная программа под лицензией MIT (LICENSE.txt).
+Сторонние компоненты (Qt for Python — LGPL-3.0, NumPy, pyqtgraph, PyOpenGL, Python)
+и тексты их лицензий — в папке licenses, список — licenses\THIRD-PARTY.txt.
